@@ -2,7 +2,7 @@
 
 A beautiful, self-hosted web dashboard that fetches your entire Steam library and seamlessly syncs it with **HowLongToBeat** data. Know exactly how long it takes to clear your backlog with style!
 
-![SteamHLTB Hero](hero_image_placeholder.png)
+<img width="2000" height="2000" alt="SteamHLTB" src="https://github.com/user-attachments/assets/c560bb44-3cd6-437b-ad25-36f8c635aaab" />
 
 ## ✨ Features
 - **Frutiger Aero & Retro Pixel Themes**: Two stunning visual modes. Toggle between the nostalgic, glassy Y2K Aero look, or slide the coolant capsule to engage a deep-black, copper-accented Retro Pixel aesthetic.
@@ -15,13 +15,16 @@ A beautiful, self-hosted web dashboard that fetches your entire Steam library an
 ## 📸 Screenshots
 
 ### Light Mode (Y2K Aero) 💧
-![Light Mode Overview](light_mode_overview_placeholder.png)
+<img width="2534" height="1422" alt="image" src="https://github.com/user-attachments/assets/2f2f79a8-32c2-4f28-934b-4cc6b985ce99" />
+
 
 ### Dark Mode (Retro Pixel) 🕹️
-![Dark Mode Overview](dark_mode_overview_placeholder.png)
+<img width="2436" height="582" alt="image" src="https://github.com/user-attachments/assets/d4ac4151-dd7e-4305-9c2d-550885e45f77" />
 
-### Time Range Filters ⏳
-![Filters Showcase](filters_showcase_placeholder.png)
+
+### Various Useful Filters ⏳
+<img width="2560" height="1416" alt="image" src="https://github.com/user-attachments/assets/08a7a0d8-94ed-4507-b170-f3b4b72a7121" />
+
 
 ---
 
