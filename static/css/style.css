@@ -171,23 +171,18 @@ body {
   gap: 1.25rem;
 }
 
-.logo h1 {
-  font-family: var(--font-display);
-  font-size: 2.2rem;
-  font-weight: 800;
-  letter-spacing: -1px;
-  /* Retro Pink Bubble Gel Font Gradient */
-  background: linear-gradient(to bottom, #ff9cd3 0%, #ff41a7 50%, #d8006f 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 4px rgba(255, 65, 167, 0.25));
+.logo-img {
+  height: 42px;
+  width: auto;
+  object-fit: contain;
 }
 
-.logo h1 span {
-  background: linear-gradient(to bottom, #a0f0ff 0%, #00bcff 50%, #0077c4 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 4px rgba(0, 188, 255, 0.25));
+.logo-light {
+  display: block;
+}
+
+.logo-dark {
+  display: none;
 }
 
 /* Replaces old cooling-system layout */
@@ -1455,23 +1450,12 @@ body {
   padding: 1.25rem 2rem;
 }
 
-/* --- Logo: Pixel font, copper gradient --- */
-[data-theme="dark"] .logo h1 {
-  font-family: var(--font-pixel);
-  font-size: 1.5rem;
-  font-weight: 400;
-  letter-spacing: 0px;
-  background: linear-gradient(to bottom, #e8c4b4 0%, #c4836a 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 8px rgba(196, 131, 106, 0.3));
+[data-theme="dark"] .logo-light {
+  display: none;
 }
 
-[data-theme="dark"] .logo h1 span {
-  background: linear-gradient(to bottom, #d4a088 0%, #a06b55 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 8px rgba(196, 131, 106, 0.2));
+[data-theme="dark"] .logo-dark {
+  display: block;
 }
 
 /* --- Coolant Capsule: copper-tinted, subtle --- */
