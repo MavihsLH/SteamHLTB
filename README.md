@@ -1,6 +1,6 @@
-# SteamHLTB 🎮 ⏱️ (⌐■_■)
+# SteamHLTB (⌐■_■)
 
-A beautiful, self-hosted web dashboard that fetches your entire Steam library and seamlessly syncs it with **HowLongToBeat** data. Know exactly how long it takes to clear your backlog with style! 
+A beautiful, self-hosted web dashboard that fetches your entire Steam library and seamlessly syncs it with **HowLongToBeat** data. Know exactly how long it takes to clear your backlog with style!
 
 ![SteamHLTB Hero](hero_image_placeholder.png)
 
