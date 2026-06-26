@@ -8,7 +8,10 @@
   (⌐■_■) Clear Your Backlog with Style.
 </p>
 
-## ✨ Features
+## (🤔) Why build this instead of just using the HowLongToBeat website?
+While HowLongToBeat is fantastic, I needed a streamlined interface dedicated specifically to sorting my own Steam library by playtime. More importantly, this dashboard seamlessly integrates and sorts **Steam Family Sharing** games—a feature that isn't natively supported by the standard HowLongToBeat website. 
+
+## (☆ω☆) Features
 - **Frutiger Aero & Retro Pixel Themes**: Two stunning visual modes. Toggle between the nostalgic, glassy Y2K Aero look, or slide the coolant capsule to engage a deep-black, copper-accented Retro Pixel aesthetic.
 - **Smart Sorting & Filtering**: Filter by Owned/Shared, Played/Unplayed, or Beat It statuses. Sort by playtime, alphabet, or HowLongToBeat lengths (Main, Extra, Completionist).
 - **Time Range Filters**: Looking for a quick weekend game? Set a Min and Max hour range to filter your library instantly.
@@ -16,24 +19,24 @@
 
 ---
 
-## 📸 Screenshots
+## [ ʘ ʘ ] Screenshots
 
-### Light Mode (Y2K Aero) 💧
+### Light Mode (Y2K Aero) ( ˘▽˘)っ♨
 <img width="2534" height="1422" alt="image" src="https://github.com/user-attachments/assets/2f2f79a8-32c2-4f28-934b-4cc6b985ce99" />
 
 
-### Dark Mode (Retro Pixel) 🕹️
+### Dark Mode (Retro Pixel) [+..••]
 <img width="2560" height="1416" alt="image" src="https://github.com/user-attachments/assets/08a7a0d8-94ed-4507-b170-f3b4b72a7121" />
 
 
 
-### Various Useful Filters ⏳
+### Various Useful Filters (¬‿¬)
 <img width="2436" height="582" alt="image" src="https://github.com/user-attachments/assets/d4ac4151-dd7e-4305-9c2d-550885e45f77" />
 
 
 ---
 
-## 🚀 Installation
+## (ง •̀_•́)ง Installation
 
 ### Prerequisites
 You will need your Steam API key and your 17-digit SteamID64.
@@ -53,7 +56,7 @@ You will need your Steam API key and your 17-digit SteamID64.
 
 ---
 
-### Option A: Running with Docker (Recommended) 🐳
+### Option A: Running with Docker (Recommended) ( 0_0 )
 
 1. Make sure you have Docker and Docker Compose installed.
 2. Ensure you have created your `config.json` as shown above. 
@@ -66,9 +69,9 @@ You will need your Steam API key and your 17-digit SteamID64.
    ```bash
    docker-compose up -d
    ```
-5. Access the dashboard at **http://localhost:3000** 🚀
+5. Access the dashboard at **http://localhost:3000** (ง •̀_•́)ง
 
-### Option B: Running with Node.js 🟩
+### Option B: Running with Node.js (⌐■_■)
 
 1. Make sure you have [Node.js](https://nodejs.org/) installed (v16 or higher recommended).
 2. Install dependencies:
@@ -80,13 +83,13 @@ You will need your Steam API key and your 17-digit SteamID64.
    ```bash
    npm start
    ```
-5. Access the dashboard at **http://localhost:3000** 🚀
+5. Access the dashboard at **http://localhost:3000** (ง •̀_•́)ง
 
 ---
 
-## 🛠️ Tech Stack
+## (ง'̀-'́)ง Tech Stack
 - **Backend**: Node.js, Express, `hltb-api`
 - **Frontend**: Vanilla HTML/JS, Modern CSS (No frameworks, just pure custom styling!)
 
-## 📝 License
+## ( ﾟヮﾟ) License
 MIT License. Feel free to fork and build upon this!
