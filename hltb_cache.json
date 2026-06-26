@@ -1,0 +1,114 @@
+{
+  "counter-strike 2": {
+    "hltbId": "1957",
+    "title": "Counter-Strike 2",
+    "gameplayMain": 145,
+    "gameplayMainExtra": 373,
+    "gameplayCompletionist": 743,
+    "imageUrl": "https://howlongtobeat.com/games/1957_Counter-Strike_2.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "marvel rivals": {
+    "hltbId": "147712",
+    "title": "Marvel Rivals",
+    "gameplayMain": 18,
+    "gameplayMainExtra": 59,
+    "gameplayCompletionist": 130,
+    "imageUrl": "https://howlongtobeat.com/games/147712_Marvel_Rivals.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "fallout 4": {
+    "hltbId": "26729",
+    "title": "Fallout 4",
+    "gameplayMain": 28,
+    "gameplayMainExtra": 83,
+    "gameplayCompletionist": 161,
+    "imageUrl": "https://howlongtobeat.com/games/Fallout_4.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "apex legends": {
+    "hltbId": "64753",
+    "title": "Apex Legends",
+    "gameplayMain": 33,
+    "gameplayMainExtra": 85,
+    "gameplayCompletionist": 153,
+    "imageUrl": "https://howlongtobeat.com/games/64753_Apex_Legends.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "resident evil 4": {
+    "hltbId": "108881",
+    "title": "Resident Evil 4",
+    "gameplayMain": 16,
+    "gameplayMainExtra": 22,
+    "gameplayCompletionist": 65,
+    "imageUrl": "https://howlongtobeat.com/games/108881_Resident_Evil_4.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "the elder scrolls v: skyrim special edition": {
+    "hltbId": "14996",
+    "title": "The Elder Scrolls V: Skyrim - Special Edition",
+    "gameplayMain": 26,
+    "gameplayMainExtra": 111,
+    "gameplayCompletionist": 203,
+    "imageUrl": "https://howlongtobeat.com/games/TheElderScrollsVSkyrimLegendaryEdition.jpg",
+    "similarity": 0.96,
+    "notFound": false
+  },
+  "yakuza kiwami (legacy)": {
+    "title": "Yakuza Kiwami (Legacy)",
+    "notFound": true
+  },
+  "sleeping dogs: definitive edition": {
+    "hltbId": "23651",
+    "title": "Sleeping Dogs: Definitive Edition",
+    "gameplayMain": 14,
+    "gameplayMainExtra": 24,
+    "gameplayCompletionist": 42,
+    "imageUrl": "https://howlongtobeat.com/games/Sleeping_Dogs_Definitive_Edition.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "ace combat™7: skies unknown": {
+    "title": "ACE COMBAT™7: SKIES UNKNOWN",
+    "notFound": true
+  },
+  "resident evil village": {
+    "hltbId": "80038",
+    "title": "Resident Evil Village",
+    "gameplayMain": 10,
+    "gameplayMainExtra": 13,
+    "gameplayCompletionist": 38,
+    "imageUrl": "https://howlongtobeat.com/games/80038_Resident_Evil_Village.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "fobia - st. dinfna hotel": {
+    "title": "Fobia - St. Dinfna Hotel",
+    "notFound": true
+  },
+  "karma: the dark world": {
+    "hltbId": "113756",
+    "title": "KARMA: The Dark World",
+    "gameplayMain": 6,
+    "gameplayMainExtra": 6,
+    "gameplayCompletionist": 7,
+    "imageUrl": "https://howlongtobeat.com/games/113756_The_Dark_World_Karma.jpg",
+    "similarity": 1,
+    "notFound": false
+  },
+  "mundaun": {
+    "hltbId": "88322",
+    "title": "Mundaun",
+    "gameplayMain": 7,
+    "gameplayMainExtra": 7,
+    "gameplayCompletionist": 9,
+    "imageUrl": "https://howlongtobeat.com/games/88322_Mundaun.jpg",
+    "similarity": 1,
+    "notFound": false
+  }
+}
