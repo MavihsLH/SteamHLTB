@@ -2,7 +2,7 @@
 
 A beautiful, self-hosted web dashboard that fetches your entire Steam library and seamlessly syncs it with **HowLongToBeat** data. Know exactly how long it takes to clear your backlog with style!
 
-<img width="1000" height="2000" alt="SteamHLTB-dark" src="https://github.com/user-attachments/assets/ee3a95bf-7233-42be-b1f3-9e455582c915" />
+<img width="1000" height="1000" alt="SteamHLTB-dark" src="https://github.com/user-attachments/assets/ee3a95bf-7233-42be-b1f3-9e455582c915" />
 
 ## ✨ Features
 - **Frutiger Aero & Retro Pixel Themes**: Two stunning visual modes. Toggle between the nostalgic, glassy Y2K Aero look, or slide the coolant capsule to engage a deep-black, copper-accented Retro Pixel aesthetic.
