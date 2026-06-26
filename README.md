@@ -21,7 +21,7 @@ While HowLongToBeat is fantastic, I needed a streamlined interface dedicated spe
 
 ## [ ʘ ʘ ] Screenshots
 
-### Light Mode (Y2K Aero) ( ˘▽˘)っ♨
+### Light Mode (Frutiger Aero Inspired) ( ˘▽˘)っ♨
 <img width="2534" height="1422" alt="image" src="https://github.com/user-attachments/assets/2f2f79a8-32c2-4f28-934b-4cc6b985ce99" />
 
 
@@ -50,7 +50,8 @@ You will need your Steam API key and your 17-digit SteamID64.
 ```json
 {
   "STEAM_API_KEY": "YOUR_API_KEY_HERE",
-  "STEAM_ID": "YOUR_17_DIGIT_STEAM_ID"
+  "STEAM_ID": "YOUR_17_DIGIT_STEAM_ID",
+  "FAMILY_STEAM_IDS": ["YOUR FRIEND'S STEAM_ID"]
 }
 ```
 
