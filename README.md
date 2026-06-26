@@ -23,11 +23,12 @@
 
 
 ### Dark Mode (Retro Pixel) 🕹️
-<img width="2436" height="582" alt="image" src="https://github.com/user-attachments/assets/d4ac4151-dd7e-4305-9c2d-550885e45f77" />
+<img width="2560" height="1416" alt="image" src="https://github.com/user-attachments/assets/08a7a0d8-94ed-4507-b170-f3b4b72a7121" />
+
 
 
 ### Various Useful Filters ⏳
-<img width="2560" height="1416" alt="image" src="https://github.com/user-attachments/assets/08a7a0d8-94ed-4507-b170-f3b4b72a7121" />
+<img width="2436" height="582" alt="image" src="https://github.com/user-attachments/assets/d4ac4151-dd7e-4305-9c2d-550885e45f77" />
 
 
 ---
