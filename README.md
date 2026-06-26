@@ -1,70 +1,84 @@
-# SteamHLTB (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+# SteamHLTB 🎮 ⏱️ (⌐■_■)
 
-A beautiful, dual-theme local web dashboard that connects to your Steam library and merges it with completion time data from HowLongToBeat. Filter, sort, and organize your backlog in style!
+A beautiful, self-hosted web dashboard that fetches your entire Steam library and seamlessly syncs it with **HowLongToBeat** data. Know exactly how long it takes to clear your backlog with style! 
 
----
+![SteamHLTB Hero](hero_image_placeholder.png)
 
-## ✧･ﾟ: *✧･ﾟ:* Features *:･ﾟ✧*:･ﾟ✧
-
-* **Steam Library Sync**: Fetches your owned and shared games directly using the Steam Web API.
-* **HowLongToBeat Integration**: Automatically estimates playtime for Main Story, Main + Extra, and Completionist runs.
-* **Smart Filtering & Sorting**: Filter by played/unplayed, ownership status, completion status, or specific Time-to-Beat ranges!
-* **Dual Themes**:
-  * **Y2K Frutiger Aero (Light Mode)**: Glossy, bubbly, and vibrant with glassmorphism.
-  * **Retro Pixel (Dark Mode)**: Deep black, copper accents, dot-matrix overlays, and classic pixel typography (`DotGothic16`).
+## ✨ Features
+- **Frutiger Aero & Retro Pixel Themes**: Two stunning visual modes. Toggle between the nostalgic, glassy Y2K Aero look, or slide the coolant capsule to engage a deep-black, copper-accented Retro Pixel aesthetic.
+- **Smart Sorting & Filtering**: Filter by Owned/Shared, Played/Unplayed, or Beat It statuses. Sort by playtime, alphabet, or HowLongToBeat lengths (Main, Extra, Completionist).
+- **Time Range Filters**: Looking for a quick weekend game? Set a Min and Max hour range to filter your library instantly.
+- **Local Caching**: `db.json` locally caches your Steam library and HLTB times so subsequent loads are lightning-fast. Syncs on command!
 
 ---
 
-## (⌐■_■) Previews
+## 📸 Screenshots
 
-### Light Mode (Y2K Aero)
-![Light Mode Preview](./docs/light-mode.png)
+### Light Mode (Y2K Aero) 💧
+![Light Mode Overview](light_mode_overview_placeholder.png)
 
-### Dark Mode (Retro Pixel)
-![Dark Mode Preview](./docs/dark-mode.png)
+### Dark Mode (Retro Pixel) 🕹️
+![Dark Mode Overview](dark_mode_overview_placeholder.png)
 
-### Filters & Sorting
-![Filters Preview](./docs/filters.png)
+### Time Range Filters ⏳
+![Filters Showcase](filters_showcase_placeholder.png)
 
 ---
 
-## (ง ͠° ͟ل͜ ͡°)ง Setup & Installation
+## 🚀 Installation
 
-1. Clone the repository:
+### Prerequisites
+You will need your Steam API key and your 17-digit SteamID64.
+1. Get your API Key here: [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
+2. Get your SteamID64 using a tool like [SteamID.io](https://steamid.io/)
+
+### Configuration
+1. Clone this repository.
+2. In the root directory, create a file named `config.json`.
+3. Add your credentials to `config.json` like this:
+```json
+{
+  "STEAM_API_KEY": "YOUR_API_KEY_HERE",
+  "STEAM_ID": "YOUR_17_DIGIT_STEAM_ID"
+}
+```
+
+---
+
+### Option A: Running with Docker (Recommended) 🐳
+
+1. Make sure you have Docker and Docker Compose installed.
+2. Ensure you have created your `config.json` as shown above. 
+3. You also need an empty `db.json` file for the initial mount (the app will write to it):
    ```bash
-   git clone https://github.com/MavihsLH/SteamHLTB.git
-   cd SteamHLTB
+   touch db.json
+   # or on Windows: type nul > db.json
    ```
+4. Run the stack in the background:
+   ```bash
+   docker-compose up -d
+   ```
+5. Access the dashboard at **http://localhost:3000** 🚀
 
+### Option B: Running with Node.js 🟩
+
+1. Make sure you have [Node.js](https://nodejs.org/) installed (v16 or higher recommended).
 2. Install dependencies:
    ```bash
    npm install
    ```
-
-3. Configure your API Keys:
-   Create a `config.json` in the root directory:
-   ```json
-   {
-     "STEAM_API_KEY": "YOUR_STEAM_API_KEY",
-     "STEAM_ID": "YOUR_STEAM_ID"
-   }
-   ```
-   *Get your Steam API key from [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)*.
-
-4. Run the server:
+3. Ensure you have created your `config.json` as shown above.
+4. Start the server:
    ```bash
    npm start
    ```
-
-5. Open your browser and go to `http://localhost:3000`.
-
----
-
-## ʕ•ᴥ•ʔ Tech Stack
-* **Frontend**: Vanilla HTML/CSS/JS (No frameworks, pure styling).
-* **Backend**: Node.js + Express.
-* **APIs**: Steam Web API, `howlongtobeat` npm package.
+5. Access the dashboard at **http://localhost:3000** 🚀
 
 ---
 
-*(Note: Image placeholders in the Previews section are ready to be replaced with actual screenshots!)*
+## 🛠️ Tech Stack
+- **Backend**: Node.js, Express, `hltb-api`
+- **Frontend**: Vanilla HTML/JS, Modern CSS (No frameworks, just pure custom styling!)
+
+## 📝 License
+MIT License. Feel free to fork and build upon this!

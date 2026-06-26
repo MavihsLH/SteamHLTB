@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  steam-hltb-app:
+    build: .
+    container_name: steam-hltb-app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./db.json:/app/db.json
+    restart: unless-stopped
