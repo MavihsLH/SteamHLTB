@@ -8,6 +8,15 @@ const PORT = process.env.PORT || 3000;
 // Enable JSON middleware
 app.use(express.json());
 
+// Request logger middleware
+app.use((req, res, next) => {
+  // Only log API requests and primary page requests to keep terminal clean
+  if (req.url.startsWith('/api') || req.url === '/' || req.url.endsWith('.html')) {
+    console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
+  }
+  next();
+});
+
 // Paths for configuration and caching
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const DB_PATH = path.join(__dirname, 'db.json');
