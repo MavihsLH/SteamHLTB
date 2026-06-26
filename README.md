@@ -8,7 +8,7 @@
   (⌐■_■) Clear Your Backlog with Style.
 </p>
 
-## (🤔) Why build this instead of just using the HowLongToBeat website?
+## (╭ರ_•́) Why build this instead of just using the HowLongToBeat website?
 While HowLongToBeat is fantastic, I needed a streamlined interface dedicated specifically to sorting my own Steam library by playtime. More importantly, this dashboard seamlessly integrates and sorts **Steam Family Sharing** games—a feature that isn't natively supported by the standard HowLongToBeat website. 
 
 ## (☆ω☆) Features
