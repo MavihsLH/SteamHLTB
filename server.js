@@ -565,7 +565,7 @@ app.get('/api/hltb', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'static')));
 
 // Fallback for SPA or simple index
-app.get('/*splat', (req, res) => {
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'static', 'html', 'index.html'));
 });
 
