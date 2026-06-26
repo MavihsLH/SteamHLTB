@@ -1,8 +1,8 @@
+<h1 align="center">SteamHLTB — Your Steam Backlog Dashboard with Howlongtobeat data</h1>
+
 <p align="center">
   <img src="https://github.com/user-attachments/assets/d5431033-cc82-47f2-ae50-5bac82ceead3" alt="SteamHLTB Logo" width="220">
 </p>
-
-<h1 align="center">SteamHLTB — Your Steam Backlog Dashboard with Howlongtobeat data</h1>
 
 <p align="center">
   (⌐■_■) Clear Your Backlog with Style.
