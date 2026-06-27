@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,8 +19,10 @@ app.use((req, res, next) => {
 });
 
 // Paths for configuration and caching
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-const DB_PATH = path.join(__dirname, 'db.json');
+const isPackaged = typeof process.pkg !== 'undefined';
+const baseDir = isPackaged ? path.dirname(process.execPath) : __dirname;
+const CONFIG_PATH = path.join(baseDir, 'config.json');
+const DB_PATH = path.join(baseDir, 'db.json');
 
 // --- Self-Contained HowLongToBeat Scraper Logic ---
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -578,11 +581,36 @@ app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'static', 'html', 'index.html'));
 });
 
+function openBrowser(url) {
+  const startCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const cmd = process.platform === 'win32' ? `start "" "${url}"` : `${startCmd} "${url}"`;
+  exec(cmd, (err) => {
+    if (err) {
+      console.error(`Failed to open browser: ${err.message}`);
+    }
+  });
+}
+
 // Start Server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
+  const url = `http://localhost:${PORT}`;
   console.log(`==================================================`);
-  console.log(`Steam HLTB App server running at http://localhost:${PORT}`);
+  console.log(`Steam HLTB App server running at ${url}`);
   console.log(`Centralized configuration: ${CONFIG_PATH}`);
   console.log(`Local unified database: ${DB_PATH}`);
   console.log(`==================================================`);
+  
+  openBrowser(url);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`Port ${PORT} is already in use. Opening browser to http://localhost:${PORT}...`);
+    openBrowser(`http://localhost:${PORT}`);
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
+  } else {
+    console.error('Server error:', err);
+  }
 });

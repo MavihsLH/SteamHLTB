@@ -2,10 +2,12 @@
   "name": "steam-hltb-app",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
+  "bin": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:exe": "pkg . --targets node22-win-x64 --output steam-hltb-app.exe"
   },
   "keywords": [],
   "author": "",
@@ -14,5 +16,13 @@
   "dependencies": {
     "express": "^5.2.1",
     "howlongtobeat": "^1.8.0"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.20.0"
+  },
+  "pkg": {
+    "assets": [
+      "static/**/*"
+    ]
   }
 }

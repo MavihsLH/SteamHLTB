@@ -86,6 +86,38 @@ You will need your Steam API key and your 17-digit SteamID64.
    ```
 5. Access the dashboard at **http://localhost:3000** (ง •̀_•́)ง
 
+### Option C: Standalone Windows Executable ( ﾟヮﾟ)
+
+If you are on Windows, you can compile the application into a standalone `.exe` (or download it from the Releases section of your GitHub repository):
+
+1. **Build the Executable**:
+   ```bash
+   npm run build:exe
+   ```
+   This will create `steam-hltb-app.exe` in the root folder.
+2. **Setup Credentials**: Make sure you have created your `config.json` in the same directory as the executable.
+3. **Run the App**: Double-click `steam-hltb-app.exe`. It will launch the background server and automatically open the application in your default browser.
+4. **Desktop Shortcut**: To create a handy shortcut on your Desktop, run the PowerShell script:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\create-shortcut.ps1
+   ```
+
+---
+
+## (•̀ᴗ•́)و CI/CD & Automated Releases
+This project includes a GitHub Actions CI/CD pipeline that automatically compiles the `.exe` and publishes it to GitHub Releases. 
+
+To trigger a release:
+1. Commit your changes and tag the release:
+   ```bash
+   git tag v1.0.0
+   ```
+2. Push your tags to GitHub:
+   ```bash
+   git push origin main --tags
+   ```
+3. GitHub Actions will spin up a Windows runner, compile `steam-hltb-app.exe`, and publish it to the repository's Releases page.
+
 ---
 
 ## (ง'̀-'́)ง Tech Stack
