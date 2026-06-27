@@ -104,25 +104,13 @@ If you are on Windows, you can compile the application into a standalone `.exe` 
 
 ---
 
-## (•̀ᴗ•́)و CI/CD & Automated Releases
-This project includes a GitHub Actions CI/CD pipeline that automatically compiles the `.exe` and publishes it to GitHub Releases. 
-
-To trigger a release:
-1. Commit your changes and tag the release:
-   ```bash
-   git tag v1.0.0
-   ```
-2. Push your tags to GitHub:
-   ```bash
-   git push origin main --tags
-   ```
-3. GitHub Actions will spin up a Windows runner, compile `steam-hltb-app.exe`, and publish it to the repository's Releases page.
-
----
-
 ## (ง'̀-'́)ง Tech Stack
 - **Backend**: Node.js, Express, `hltb-api`
 - **Frontend**: Vanilla HTML/JS, Modern CSS (No frameworks, just pure custom styling!)
+
+## ( ﾟヮﾟ) Credits
+- Playtime data parsed from [HowLongToBeat](https://howlongtobeat.com/).
+- Game libraries and family sharing data fetched via the [Steam Web API](https://partner.steamgames.com/doc/webapi_overview) (Valve Corporation).
 
 ## ( ﾟヮﾟ) License
 MIT License. Feel free to fork and build upon this!
