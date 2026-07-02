@@ -109,4 +109,4 @@ You will need your Steam API key and your 17-digit SteamID64:
 - Game libraries and family sharing data fetched via the [Steam Web API](https://partner.steamgames.com/doc/webapi_overview) (Valve Corporation).
 
 ## ( ﾟヮﾟ) License
-MIT License. Feel free to fork and build upon this!
+Proprietary License (All Rights Reserved). See the [LICENSE](LICENSE) file for more details.
