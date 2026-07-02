@@ -22,16 +22,15 @@ While HowLongToBeat is fantastic, I needed a streamlined interface dedicated spe
 ## [ ʘ ʘ ] Screenshots
 
 ### Light Mode (Frutiger Aero Inspired) ( ˘▽˘)っ♨
-<img width="2534" height="1422" alt="image" src="https://github.com/user-attachments/assets/2f2f79a8-32c2-4f28-934b-4cc6b985ce99" />
+<img width="2560" height="1548" alt="image" src="https://github.com/user-attachments/assets/46375ea3-2905-4f01-96f5-8c45a01fbeb2" />
 
 
 ### Dark Mode (Retro Pixel) [+..••]
-<img width="2560" height="1416" alt="image" src="https://github.com/user-attachments/assets/08a7a0d8-94ed-4507-b170-f3b4b72a7121" />
-
+<img width="2560" height="1540" alt="image" src="https://github.com/user-attachments/assets/79029363-3710-4ad4-b8fb-cd507af9fc0b" />
 
 
 ### Various Useful Filters (¬‿¬)
-<img width="2436" height="582" alt="image" src="https://github.com/user-attachments/assets/d4ac4151-dd7e-4305-9c2d-550885e45f77" />
+<img width="2508" height="1204" alt="image" src="https://github.com/user-attachments/assets/62caf019-9ed7-4e87-b750-529957c4b6bd" />
 
 
 ---
