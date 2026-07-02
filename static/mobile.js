@@ -9,7 +9,7 @@ const MAX_CONCURRENT_SYNC = 4;
 let visibleCardCount = 40;
 const BATCH_SIZE = 40;
 
-const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined;
+const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
 // DOM Elements
 const mobileStatusIndicator = document.getElementById('mobile-status-indicator');

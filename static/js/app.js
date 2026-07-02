@@ -10,7 +10,7 @@ let visibleCardCount = 40;
 const BATCH_SIZE = 40;
 
 // Mobile Environment Detection
-const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined;
+const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
 // Native Preference Storage Helpers for Mobile
 async function getMobileConfig() {

@@ -1,5 +1,10 @@
 {
   "appId": "com.mavihslh.steamhltb",
   "appName": "SteamHLTB",
-  "webDir": "static"
+  "webDir": "static",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
 }
