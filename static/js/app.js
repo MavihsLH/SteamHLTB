@@ -9,6 +9,286 @@ const MAX_CONCURRENT_SYNC = 4; // limit concurrent HLTB requests to avoid thrott
 let visibleCardCount = 40;
 const BATCH_SIZE = 40;
 
+// Mobile Environment Detection
+const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined;
+
+// Native Preference Storage Helpers for Mobile
+async function getMobileConfig() {
+  if (!isMobileApp) return null;
+  const { Preferences } = window.Capacitor.Plugins;
+  try {
+    const { value } = await Preferences.get({ key: 'config' });
+    return value ? JSON.parse(value) : null;
+  } catch (err) {
+    console.error('Error reading mobile config:', err);
+    return null;
+  }
+}
+
+async function saveMobileConfig(config) {
+  if (!isMobileApp) return;
+  const { Preferences } = window.Capacitor.Plugins;
+  await Preferences.set({
+    key: 'config',
+    value: JSON.stringify(config)
+  });
+}
+
+async function getMobileLibrary() {
+  if (!isMobileApp) return { games: [], lastSync: 0 };
+  const { Preferences } = window.Capacitor.Plugins;
+  try {
+    const { value } = await Preferences.get({ key: 'library' });
+    return value ? JSON.parse(value) : { games: [], lastSync: 0 };
+  } catch (err) {
+    console.error('Error reading mobile library:', err);
+    return { games: [], lastSync: 0 };
+  }
+}
+
+async function saveMobileLibrary(libraryData) {
+  if (!isMobileApp) return;
+  const { Preferences } = window.Capacitor.Plugins;
+  await Preferences.set({
+    key: 'library',
+    value: JSON.stringify(libraryData)
+  });
+}
+
+// CJK / Punctuation / Digit-boundary cleaner for mobile search queries
+function cleanGameTitleForSearch(title) {
+  if (!title) return '';
+  let cleaned = title.toLowerCase().trim();
+  const hasAscii = /[a-z0-9]/.test(cleaned);
+  const hasNonAscii = /[^\x00-\x7F]/.test(cleaned);
+  if (hasAscii && hasNonAscii) {
+    cleaned = cleaned.replace(/[^\x00-\x7F]/g, ' ');
+  }
+  cleaned = cleaned.replace(/[™®©\-–—/\\_.,]/g, ' ');
+  cleaned = cleaned.replace(/\([^)]*\)/g, '');
+  if (cleaned.includes(':')) {
+    cleaned = cleaned.split(':')[0];
+  }
+  cleaned = cleaned.replace(/([a-z])([0-9])/g, '$1 $2');
+  cleaned = cleaned.replace(/([0-9])([a-z])/g, '$1 $2');
+  cleaned = cleaned.replace(/\s+/g, ' ');
+  return cleaned.trim();
+}
+
+// Mobile-specific HLTB query executor
+async function scrapeHltbMobile(gameName) {
+  if (!isMobileApp) return null;
+  const { CapacitorHttp } = window.Capacitor.Plugins;
+  const now = Date.now();
+  const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  
+  try {
+    const initUrl = `https://howlongtobeat.com/api/bleed/init?t=${now}`;
+    const initRes = await CapacitorHttp.get({
+      url: initUrl,
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Referer': 'https://howlongtobeat.com/',
+        'Origin': 'https://howlongtobeat.com'
+      }
+    });
+    if (initRes.status !== 200 || !initRes.data) return null;
+    
+    const auth = initRes.data;
+    const searchTerms = gameName.trim().split(' ');
+    const payload = {
+      searchType: "games",
+      searchTerms: searchTerms,
+      searchPage: 1,
+      size: 20,
+      searchOptions: {
+        games: {
+          userId: 0,
+          platform: "",
+          sortCategory: "popular",
+          rangeCategory: "main",
+          rangeTime: { min: 0, max: 0 },
+          gameplay: { perspective: "", flow: "", genre: "", difficulty: "" },
+          rangeYear: { min: "", max: "" },
+          modifier: ""
+        },
+        users: { sortCategory: "postcount" },
+        lists: { sortCategory: "follows" },
+        filter: "",
+        sort: 0,
+        randomizer: 0
+      },
+      useCache: true
+    };
+    
+    if (auth.hpKey) {
+      payload[auth.hpKey] = auth.hpVal;
+    }
+    
+    const queryRes = await CapacitorHttp.post({
+      url: "https://howlongtobeat.com/api/bleed",
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Content-Type': 'application/json',
+        'Origin': 'https://howlongtobeat.com',
+        'Referer': 'https://howlongtobeat.com/',
+        'x-auth-token': auth.token,
+        'x-hp-key': auth.hpKey,
+        'x-hp-val': auth.hpVal
+      },
+      data: payload
+    });
+    
+    if (queryRes.status !== 200 || !queryRes.data) return null;
+    return queryRes.data.data || [];
+  } catch (err) {
+    console.error('Mobile HLTB query error:', err);
+    return null;
+  }
+}
+
+// Mobile-specific local sync processor
+async function performMobileSync(force) {
+  if (!isMobileApp) return null;
+  const { Preferences, CapacitorHttp } = window.Capacitor.Plugins;
+  
+  const config = await getMobileConfig();
+  if (!config || !config.STEAM_API_KEY || !config.STEAM_ID) {
+    throw new Error('Steam API Key or Steam ID is missing in settings.');
+  }
+  
+  const apiKey = config.STEAM_API_KEY;
+  let primaryId = config.STEAM_ID;
+  const familyIds = config.FAMILY_STEAM_IDS || [];
+  
+  if (isNaN(primaryId)) {
+    const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${primaryId}`;
+    const resolveRes = await CapacitorHttp.get({ url: resolveUrl });
+    if (resolveRes.status === 200 && resolveRes.data && resolveRes.data.response && resolveRes.data.response.steamid) {
+      primaryId = resolveRes.data.response.steamid;
+    } else {
+      throw new Error('Failed to resolve Steam Vanity URL.');
+    }
+  }
+  
+  const fetchGames = async (steamId) => {
+    const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamId}&include_appinfo=true&include_played_free_games=true&format=json`;
+    const response = await CapacitorHttp.get({ url });
+    if (response.status !== 200) {
+      throw new Error(`Failed to fetch games for SteamID ${steamId}`);
+    }
+    return response.data?.response?.games || [];
+  };
+  
+  const primaryGames = await fetchGames(primaryId);
+  const gamesMap = new Map();
+  for (const game of primaryGames) {
+    gamesMap.set(game.appid, {
+      appid: game.appid,
+      name: game.name,
+      playtime_forever: game.playtime_forever || 0,
+      img_icon_url: game.img_icon_url || '',
+      owner_steamid: primaryId,
+      is_owned: true,
+      source: 'primary'
+    });
+  }
+  
+  for (const memberId of familyIds) {
+    let resolvedMemberId = memberId;
+    if (isNaN(memberId)) {
+      const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${memberId}`;
+      const resolveRes = await CapacitorHttp.get({ url: resolveUrl });
+      if (resolveRes.status === 200 && resolveRes.data?.response?.steamid) {
+        resolvedMemberId = resolveRes.data.response.steamid;
+      }
+    }
+    
+    try {
+      const memberGames = await fetchGames(resolvedMemberId);
+      for (const game of memberGames) {
+        if (!gamesMap.has(game.appid)) {
+          gamesMap.set(game.appid, {
+            appid: game.appid,
+            name: game.name,
+            playtime_forever: 0,
+            img_icon_url: game.img_icon_url || '',
+            owner_steamid: resolvedMemberId,
+            is_owned: false,
+            source: 'family_manual'
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to fetch games for family member ${memberId}:`, err);
+    }
+  }
+  
+  const allGames = Array.from(gamesMap.values());
+  let existingHltbMap = new Map();
+  if (!force) {
+    const currentLibrary = await getMobileLibrary();
+    (currentLibrary.games || []).forEach(g => {
+      if (g.hltb) existingHltbMap.set(g.appid, g.hltb);
+    });
+  }
+  
+  const mergedGames = allGames.map(game => ({
+    ...game,
+    hltb: existingHltbMap.get(game.appid) || null
+  }));
+  
+  const libraryData = {
+    games: mergedGames,
+    lastSync: Date.now()
+  };
+  
+  await saveMobileLibrary(libraryData);
+  return libraryData;
+}
+
+// Fetch single game HLTB details on mobile or desktop
+async function fetchHltbData(game) {
+  if (isMobileApp) {
+    const cleanedTitle = cleanGameTitleForSearch(game.name);
+    if (!cleanedTitle) return { title: game.name, notFound: true };
+    
+    console.log(`Searching HowLongToBeat (mobile) for: "${game.name}" (Cleaned: "${cleanedTitle}")...`);
+    let results = await scrapeHltbMobile(game.name);
+    
+    if (!results || results.length === 0) {
+      if (cleanedTitle !== game.name.toLowerCase().trim()) {
+        results = await scrapeHltbMobile(cleanedTitle);
+      }
+    }
+    
+    if (results && results.length > 0) {
+      const cacheKey = game.name.trim().toLowerCase();
+      const exactMatch = results.find(r => r.game_name?.toLowerCase() === cacheKey);
+      const match = exactMatch || results[0];
+      
+      return {
+        hltbId: String(match.game_id),
+        title: match.game_name,
+        gameplayMain: Math.round((match.comp_main || 0) / 3600),
+        gameplayMainExtra: Math.round((match.comp_plus || 0) / 3600),
+        gameplayCompletionist: Math.round((match.comp_100 || 0) / 3600),
+        imageUrl: match.game_image ? `https://howlongtobeat.com/games/${match.game_image}` : '',
+        notFound: false
+      };
+    } else {
+      return {
+        title: game.name,
+        notFound: true
+      };
+    }
+  } else {
+    const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}`);
+    if (!res.ok) throw new Error('HLTB fetch failed');
+    return await res.json();
+  }
+}
+
 // DOM Elements
 const configStatus = document.getElementById('config-status');
 const statTotalGames = document.getElementById('stat-total-games');
@@ -253,17 +533,21 @@ async function triggerSync(force = false) {
   }
   
   try {
-    const res = await fetch('/api/sync', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force })
-    });
-    if (!res.ok) {
-      const errData = await res.json();
-      throw new Error(errData.error || 'Failed to sync with Steam.');
+    let data;
+    if (isMobileApp) {
+      data = await performMobileSync(force);
+    } else {
+      const res = await fetch('/api/sync', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to sync with Steam.');
+      }
+      data = await res.json();
     }
-    
-    const data = await res.json();
     
     // Map new games list and keep existing client-side HLTB cache if available
     const existingHltbMap = new Map();
@@ -331,13 +615,21 @@ async function fetchLibrary() {
     loadingTitle.textContent = 'Loading library...';
     loadingSubtitle.textContent = 'Fetching games list from local database';
     
-    const res = await fetch('/api/games');
-    if (!res.ok) {
-      const errData = await res.json();
-      throw new Error(errData.error || 'Failed to fetch library.');
+    let data;
+    if (isMobileApp) {
+      const mobileConfig = await getMobileConfig();
+      if (!mobileConfig || !mobileConfig.STEAM_API_KEY || !mobileConfig.STEAM_ID) {
+        throw new Error('Steam credentials are not configured.');
+      }
+      data = await getMobileLibrary();
+    } else {
+      const res = await fetch('/api/games');
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to fetch library.');
+      }
+      data = await res.json();
     }
-    
-    const data = await res.json();
     
     // Set up status badge
     configStatus.className = 'status-badge status-connected';
@@ -414,7 +706,23 @@ async function fetchLibrary() {
     console.error('Error fetching library:', err);
     configStatus.className = 'status-badge status-error';
     configStatus.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Connection Error';
-    errorMessage.textContent = err.message || 'Could not connect to server or Steam API.';
+    if (isMobileApp) {
+      errorMessage.textContent = 'Could not fetch Steam library. Please configure your Steam API Key and Steam ID.';
+      const helpBox = document.querySelector('#error-view .help-box');
+      if (helpBox) {
+        helpBox.innerHTML = `
+          <h3>How to get started:</h3>
+          <ol>
+            <li>Tap the <strong>Gear Icon</strong> (<i class="fa-solid fa-gear"></i>) in the top-right corner.</li>
+            <li>Enter your <strong>Steam API Key</strong> and <strong>Steam ID</strong>.</li>
+            <li>Tap <strong>Save Settings</strong>.</li>
+            <li>Tap <strong>Sync Library</strong> in the header to import your games!</li>
+          </ol>
+        `;
+      }
+    } else {
+      errorMessage.textContent = err.message || 'Could not connect to server or Steam API.';
+    }
     loadingView.style.display = 'none';
     errorView.style.display = 'flex';
   }
@@ -692,12 +1000,17 @@ async function processNextQueueItem() {
   updateGameInUI(game);
   
   try {
-    const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}`);
-    if (!res.ok) throw new Error('Network error fetching HLTB times');
-    const hltbData = await res.json();
+    const hltbData = await fetchHltbData(game);
     
     game.hltb = hltbData;
     game.hltbLoading = false;
+    
+    if (isMobileApp) {
+      await saveMobileLibrary({
+        games: games,
+        lastSync: Date.now()
+      });
+    }
   } catch (err) {
     console.error(`Failed to get HLTB for ${game.name}:`, err);
     game.hltbError = true;
@@ -1129,9 +1442,14 @@ async function openSettingsModal() {
   modal.style.display = 'flex';
   
   try {
-    const res = await fetch('/api/config');
-    if (!res.ok) throw new Error('Failed to fetch settings');
-    const data = await res.json();
+    let data;
+    if (isMobileApp) {
+      data = await getMobileConfig() || {};
+    } else {
+      const res = await fetch('/api/config');
+      if (!res.ok) throw new Error('Failed to fetch settings');
+      data = await res.json();
+    }
     
     const apiKeyInput = document.getElementById('settings-api-key');
     const steamIdInput = document.getElementById('settings-steam-id');
@@ -1176,19 +1494,33 @@ async function handleSettingsSave(e) {
       payload.STEAM_API_KEY = apiKey;
     }
     
-    const res = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Failed to save settings');
+    if (isMobileApp) {
+      const currentConfig = await getMobileConfig() || {};
+      const finalPayload = {
+        ...payload,
+        STEAM_API_KEY: payload.STEAM_API_KEY || currentConfig.STEAM_API_KEY || ''
+      };
+      finalPayload.STEAM_API_KEY_SET = !!finalPayload.STEAM_API_KEY;
+      finalPayload.STEAM_API_KEY_MASKED = finalPayload.STEAM_API_KEY ? '••••••••••••••••••••••••••••••••' : '';
+      
+      await saveMobileConfig(finalPayload);
+      document.getElementById('settings-modal').style.display = 'none';
+      fetchLibrary();
+    } else {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to save settings');
+      }
+      
+      document.getElementById('settings-modal').style.display = 'none';
+      fetchLibrary();
     }
-    
-    document.getElementById('settings-modal').style.display = 'none';
-    fetchLibrary();
   } catch (err) {
     console.error('Failed to save settings:', err);
     alert(`Failed to save settings: ${err.message}`);
