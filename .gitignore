@@ -5,4 +5,6 @@ config.json
 db.json
 steam-hltb-app.exe
 dist/
+debug/
+
 

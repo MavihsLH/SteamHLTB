@@ -547,8 +547,8 @@ function cleanGameTitleForSearch(title) {
   if (!title) return '';
   let cleaned = title.toLowerCase().trim();
   
-  // 1. Remove trademark, registered, copyright and other symbols
-  cleaned = cleaned.replace(/[™®©]/g, '');
+  // 1. Replace trademark, registered, copyright and other symbols with space
+  cleaned = cleaned.replace(/[™®©]/g, ' ');
   
   // 2. Remove anything in parenthesis (e.g. (Beta), (Demo), (soundtrack))
   cleaned = cleaned.replace(/\([^)]*\)/g, '');
@@ -560,6 +560,9 @@ function cleanGameTitleForSearch(title) {
   } else if (cleaned.includes(' - ')) {
     cleaned = cleaned.split(' - ')[0];
   }
+  
+  // 4. Collapse multiple spaces
+  cleaned = cleaned.replace(/\s+/g, ' ');
   
   return cleaned.trim();
 }
