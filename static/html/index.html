@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Steam Library & HowLongToBeat Dashboard</title>
   <!-- Google Fonts: Outfit and Share Tech Mono for the LCD look -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -55,6 +55,9 @@
               <i class="fa-solid fa-arrows-rotate"></i> Sync Library
             </button>
             <span id="last-sync-time" class="last-sync-text" style="display: none;"></span>
+            <button id="settings-btn" class="settings-toggle-btn" title="Settings">
+              <i class="fa-solid fa-gear"></i>
+            </button>
           </div>
         </div>
       </header>
@@ -101,19 +104,101 @@
               </div>
             </div>
             <div class="card-gel-glow"></div>
+        </section>
+
+        <!-- Backlog Insights Panel -->
+        <section id="insights-section" class="insights-section" style="display: none;">
+          <div class="insights-header">
+            <h3><i class="fa-solid fa-chart-line"></i> Backlog Insights &amp; Recommendations</h3>
+          </div>
+          <div class="insights-grid">
+            <div class="insights-card card-cyan">
+              <div class="insight-icon"><i class="fa-solid fa-hourglass-half"></i></div>
+              <div class="insight-info">
+                <span class="insight-label">Backlog Size</span>
+                <h4 id="insight-backlog-games">-</h4>
+                <p id="insight-backlog-hours">-</p>
+              </div>
+            </div>
+            
+            <div class="insights-card card-blue">
+              <div class="insight-icon"><i class="fa-solid fa-calendar-days"></i></div>
+              <div class="insight-info">
+                <span class="insight-label">Clearance Estimate</span>
+                <h4 id="insight-clear-time">-</h4>
+                <p>At 5 hrs/week average play</p>
+              </div>
+            </div>
+
+            <div class="insights-card card-green">
+              <div class="insight-icon"><i class="fa-solid fa-gift"></i></div>
+              <div class="insight-info">
+                <span class="insight-label">Neglected Backlog Gem</span>
+                <h4 id="insight-neglected-name">-</h4>
+                <p id="insight-neglected-time">-</p>
+              </div>
+            </div>
+            
+            <!-- What Should I Play Next suggestion card -->
+            <div class="insights-card card-pink suggestion-card">
+              <div class="insight-icon"><i class="fa-solid fa-dice"></i></div>
+              <div class="insight-info">
+                <span class="insight-label">What to play next?</span>
+                <div class="suggestion-actions">
+                  <button id="suggest-next-btn" class="suggest-btn">Roll the Dice</button>
+                </div>
+                <div id="suggestion-result" class="suggestion-result" style="display: none;">
+                  <h4 id="suggested-game-name">-</h4>
+                  <p id="suggested-game-time">-</p>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
-        <!-- Attached Console controls group (Collapsed by default) -->
-        <div class="console-controls-group">
-          <div class="console-toggle-bar">
-            <button id="toggle-controls-btn" class="console-toggle-btn">
-              <i class="fa-solid fa-sliders"></i> Control Console Panel
-              <span class="toggle-led"></span>
-            </button>
+        <!-- Loader / Status -->
+        <section id="loading-view" class="status-view">
+          <div class="spinner"></div>
+          <h2 id="loading-title">Loading library...</h2>
+          <p id="loading-subtitle">Fetching games list from Steam API</p>
+          <div class="progress-bar-container" style="display: none;">
+            <div class="progress-bar-fill" id="hltb-progress-fill" style="width: 0%;"></div>
+          </div>
+          <p id="progress-text" style="display: none;">0/0 games analyzed</p>
+        </section>
+
+        <section id="error-view" class="status-view" style="display: none;">
+          <div class="error-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+          <h2>Configuration Required</h2>
+          <p id="error-message">Could not fetch Steam library. Please configure config.json with your Steam API Key and SteamID.</p>
+          <div class="help-box">
+            <h3>How to get started:</h3>
+            <ol>
+              <li>Open the file [config.json](file:///config.json) in the project directory.</li>
+              <li>Enter your <strong>STEAM_API_KEY</strong> (get it from <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a>).</li>
+              <li>Enter your <strong>STEAM_ID</strong> (17-digit numeric SteamID64, e.g., 76561198xxxxxxxx).</li>
+              <li>Save the file and refresh this page.</li>
+            </ol>
+          </div>
+          <button class="retry-btn" onclick="window.location.reload()"><i class="fa-solid fa-rotate-right"></i> Retry</button>
+        </section>
+
+        <!-- Library Section (with integrated controls) -->
+        <section id="library-section" style="display: none;">
+          <div class="section-header">
+            <h2 class="section-title">Games Library (<span id="visible-games-count">0</span>)</h2>
+            <div class="section-header-actions">
+              <button id="toggle-controls-btn" class="console-toggle-btn">
+                <i class="fa-solid fa-sliders"></i> Filters & Sort
+                <span class="toggle-led"></span>
+              </button>
+              <div class="sync-badge" id="hltb-sync-status" style="display: none;">
+                <i class="fa-solid fa-arrows-spin fa-spin"></i> HLTB syncing: <span id="hltb-sync-percent">0%</span>
+              </div>
+            </div>
           </div>
 
-          <!-- Controls Console Panel -->
+          <!-- Controls Console Panel (Collapsed by default) -->
           <section class="controls-section collapsed">
             <div class="search-bar-wrapper">
               <i class="fa-solid fa-magnifying-glass search-icon"></i>
@@ -193,43 +278,6 @@
               </div>
             </div>
           </section>
-        </div>
-
-        <!-- Loader / Status -->
-        <section id="loading-view" class="status-view">
-          <div class="spinner"></div>
-          <h2 id="loading-title">Loading library...</h2>
-          <p id="loading-subtitle">Fetching games list from Steam API</p>
-          <div class="progress-bar-container" style="display: none;">
-            <div class="progress-bar-fill" id="hltb-progress-fill" style="width: 0%;"></div>
-          </div>
-          <p id="progress-text" style="display: none;">0/0 games analyzed</p>
-        </section>
-
-        <section id="error-view" class="status-view" style="display: none;">
-          <div class="error-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-          <h2>Configuration Required</h2>
-          <p id="error-message">Could not fetch Steam library. Please configure config.json with your Steam API Key and SteamID.</p>
-          <div class="help-box">
-            <h3>How to get started:</h3>
-            <ol>
-              <li>Open the file [config.json](file:///config.json) in the project directory.</li>
-              <li>Enter your <strong>STEAM_API_KEY</strong> (get it from <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a>).</li>
-              <li>Enter your <strong>STEAM_ID</strong> (17-digit numeric SteamID64, e.g., 76561198xxxxxxxx).</li>
-              <li>Save the file and refresh this page.</li>
-            </ol>
-          </div>
-          <button class="retry-btn" onclick="window.location.reload()"><i class="fa-solid fa-rotate-right"></i> Retry</button>
-        </section>
-
-        <!-- Library Grid -->
-        <section id="library-section" style="display: none;">
-          <div class="section-header">
-            <h2 class="section-title">Games Library (<span id="visible-games-count">0</span>)</h2>
-            <div class="sync-badge" id="hltb-sync-status" style="display: none;">
-              <i class="fa-solid fa-arrows-spin fa-spin"></i> HLTB syncing: <span id="hltb-sync-percent">0%</span>
-            </div>
-          </div>
           
           <div class="games-grid" id="games-grid">
             <!-- Game Cards will be dynamically injected here -->
@@ -237,14 +285,109 @@
         </section>
       </main>
 
-      <footer class="app-footer">
-        <p>SteamHLTB Dashboard &copy; 2026. Game data fetched from Steam Web API. Playtime metrics estimated by HowLongToBeat.</p>
-      </footer>
     </div>
 
     <!-- Right Grille panel -->
     <div class="console-grille right-grille"></div>
   </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-gear"></i> Settings</h2>
+        <button id="close-settings-btn" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="settings-form">
+          <div class="form-group">
+            <label for="settings-api-key">Steam API Key</label>
+            <input type="password" id="settings-api-key" placeholder="Enter Steam Web API Key">
+            <small>Get your key from <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a></small>
+          </div>
+          <div class="form-group">
+            <label for="settings-steam-id">Primary Steam ID</label>
+            <input type="text" id="settings-steam-id" placeholder="Enter SteamID64 or Custom Vanity URL">
+            <small>17-digit numeric ID or custom URL name (e.g. your username)</small>
+          </div>
+          <div class="form-group">
+            <label for="settings-family-ids">Family Member Steam IDs (comma separated, optional)</label>
+            <input type="text" id="settings-family-ids" placeholder="e.g. 76561198xxxxxxxx, username2">
+            <small>Configured family members will be merged automatically</small>
+          </div>
+          <div class="form-actions">
+            <button type="submit" id="save-settings-btn" class="sync-library-btn">Save Settings</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Detail Slide-out Panel -->
+  <div id="game-detail-panel" class="detail-panel">
+    <button id="close-detail-btn" class="detail-close-btn"><i class="fa-solid fa-xmark"></i></button>
+    <div class="detail-content">
+      <div class="detail-cover-wrapper">
+        <img id="detail-cover" src="" alt="Game Cover">
+        <div id="detail-playtime-badge" class="detail-playtime-badge">0 hrs</div>
+      </div>
+      <div class="detail-info-section">
+        <h2 id="detail-title">Game Title</h2>
+        <div id="detail-owner-badge" class="detail-owner-badge-container"></div>
+        
+        <div class="detail-stats-section">
+          <h3><i class="fa-solid fa-clock"></i> HowLongToBeat Stats</h3>
+          <div id="detail-hltb-loading" class="detail-hltb-loading" style="display: none;">
+            <i class="fa-solid fa-spinner fa-spin"></i> Loading...
+          </div>
+          <div id="detail-hltb-error" class="detail-hltb-error" style="display: none;">
+            <i class="fa-solid fa-triangle-exclamation"></i> Error loading times
+          </div>
+          <div id="detail-hltb-none" class="detail-hltb-none" style="display: none;">
+            <i class="fa-solid fa-circle-minus"></i> HLTB data not found
+          </div>
+          
+          <div id="detail-hltb-stats" class="detail-hltb-stats">
+            <div class="detail-progress-item">
+              <div class="progress-label-row">
+                <span>Main Story</span>
+                <span id="detail-time-main">0h</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="detail-progress-main" class="progress-bar-fill main-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+            
+            <div class="detail-progress-item">
+              <div class="progress-label-row">
+                <span>Main + Extra</span>
+                <span id="detail-time-extra">0h</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="detail-progress-extra" class="progress-bar-fill extra-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+            
+            <div class="detail-progress-item">
+              <div class="progress-label-row">
+                <span>100% Completionist</span>
+                <span id="detail-time-completionist">0h</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="detail-progress-completionist" class="progress-bar-fill completionist-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="detail-actions">
+          <a id="detail-steam-link" href="#" target="_blank" class="detail-action-btn steam-btn"><i class="fa-brands fa-steam"></i> Steam Store</a>
+          <a id="detail-hltb-link" href="#" target="_blank" class="detail-action-btn hltb-btn"><i class="fa-solid fa-circle-info"></i> HowLongToBeat</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="panel-overlay" class="panel-overlay"></div>
 
   <script src="/js/app.js"></script>
 </body>

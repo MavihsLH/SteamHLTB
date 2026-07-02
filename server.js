@@ -18,9 +18,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// Detect if running under Electron
+const isElectron = typeof process.versions.electron !== 'undefined';
+let isElectronPackaged = false;
+if (isElectron) {
+  isElectronPackaged = require('electron').app.isPackaged;
+}
+
 // Paths for configuration and caching
 const isPackaged = typeof process.pkg !== 'undefined';
-const baseDir = isPackaged ? path.dirname(process.execPath) : __dirname;
+const baseDir = (isPackaged || isElectronPackaged) ? path.dirname(process.execPath) : __dirname;
 const CONFIG_PATH = path.join(baseDir, 'config.json');
 const DB_PATH = path.join(baseDir, 'db.json');
 
@@ -234,6 +241,13 @@ const flushDbOnExit = () => {
     }
   }
 };
+
+if (isElectron) {
+  const { app: electronApp } = require('electron');
+  electronApp.on('will-quit', () => {
+    flushDbOnExit();
+  });
+}
 
 process.on('SIGINT', () => {
   flushDbOnExit();
@@ -573,6 +587,52 @@ app.get('/api/hltb', async (req, res) => {
   }
 });
 
+// API endpoint to read current config (with masked API key for security)
+app.get('/api/config', (req, res) => {
+  const config = loadConfig();
+  const apiKey = config.STEAM_API_KEY || '';
+  const maskedKey = apiKey.length > 8
+    ? apiKey.slice(0, 4) + '•'.repeat(apiKey.length - 8) + apiKey.slice(-4)
+    : apiKey ? '•'.repeat(apiKey.length) : '';
+  
+  res.json({
+    STEAM_API_KEY_MASKED: maskedKey,
+    STEAM_API_KEY_SET: apiKey.length > 0 && apiKey !== 'YOUR_STEAM_API_KEY_HERE',
+    STEAM_ID: config.STEAM_ID || '',
+    FAMILY_STEAM_IDS: config.FAMILY_STEAM_IDS || []
+  });
+});
+
+// API endpoint to update config
+app.post('/api/config', (req, res) => {
+  const { STEAM_API_KEY, STEAM_ID, FAMILY_STEAM_IDS } = req.body;
+  
+  // Load existing config to preserve fields not being updated
+  const existing = loadConfig();
+  
+  // Only overwrite API key if a new one was provided (not the masked placeholder)
+  if (STEAM_API_KEY && !STEAM_API_KEY.includes('•')) {
+    existing.STEAM_API_KEY = STEAM_API_KEY.trim();
+  }
+  
+  if (STEAM_ID !== undefined) {
+    existing.STEAM_ID = String(STEAM_ID).trim();
+  }
+  
+  if (Array.isArray(FAMILY_STEAM_IDS)) {
+    existing.FAMILY_STEAM_IDS = FAMILY_STEAM_IDS.map(id => String(id).trim()).filter(Boolean);
+  }
+  
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2), 'utf8');
+    console.log('Configuration updated successfully.');
+    res.json({ success: true, message: 'Configuration saved.' });
+  } catch (err) {
+    console.error('Error writing config.json:', err);
+    res.status(500).json({ error: 'Failed to save configuration.' });
+  }
+});
+
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, 'static')));
 
@@ -592,24 +652,120 @@ function openBrowser(url) {
 }
 
 // Start Server
-const server = app.listen(PORT, () => {
-  const url = `http://localhost:${PORT}`;
+const listenPort = isElectron ? 0 : PORT;
+
+const server = app.listen(listenPort, () => {
+  const actualPort = server.address().port;
+  const url = `http://localhost:${actualPort}`;
   console.log(`==================================================`);
   console.log(`Steam HLTB App server running at ${url}`);
   console.log(`Centralized configuration: ${CONFIG_PATH}`);
   console.log(`Local unified database: ${DB_PATH}`);
   console.log(`==================================================`);
   
-  openBrowser(url);
+  if (isElectron) {
+    const { app: electronApp, BrowserWindow, shell } = require('electron');
+    
+    const loadWindow = () => {
+      const win = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        title: "SteamHLTB",
+        icon: path.join(__dirname, 'static', 'img', 'SteamHLTB-dark-transparent.png'),
+        autoHideMenuBar: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      });
+      
+      win.loadURL(url);
+      
+      // Disable visual zoom limits (pinch zoom)
+      win.webContents.setVisualZoomLevelLimits(1, 1);
+      
+      // Reset zoom factor to 1 on load
+      win.webContents.on('did-finish-load', () => {
+        win.webContents.setZoomFactor(1);
+      });
+      
+      // Open external links in default browser instead of the Electron window
+      win.webContents.setWindowOpenHandler(({ url: extUrl }) => {
+        if (extUrl.startsWith('http://localhost') || extUrl.startsWith('http://127.0.0.1')) {
+          return { action: 'allow' };
+        }
+        shell.openExternal(extUrl).catch(err => {
+          console.error(`Failed to open external URL: ${err.message}`);
+        });
+        return { action: 'deny' };
+      });
+    };
+
+    if (electronApp.isReady()) {
+      loadWindow();
+    } else {
+      electronApp.whenReady().then(loadWindow);
+    }
+    
+    electronApp.on('window-all-closed', () => {
+      server.close(() => {
+        electronApp.quit();
+      });
+    });
+  } else {
+    openBrowser(url);
+  }
 });
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} is already in use. Opening browser to http://localhost:${PORT}...`);
-    openBrowser(`http://localhost:${PORT}`);
-    setTimeout(() => {
-      process.exit(0);
-    }, 1000);
+    console.log(`Port ${PORT} is already in use. Loading Electron/Browser window...`);
+    if (isElectron) {
+      const { app: electronApp, BrowserWindow, shell } = require('electron');
+      const loadWindow = () => {
+        const win = new BrowserWindow({
+          width: 1200,
+          height: 800,
+          title: "SteamHLTB",
+          icon: path.join(__dirname, 'static', 'img', 'SteamHLTB-dark-transparent.png'),
+          autoHideMenuBar: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+          }
+        });
+        win.loadURL(`http://localhost:${PORT}`);
+        
+        // Disable visual zoom limits (pinch zoom)
+        win.webContents.setVisualZoomLevelLimits(1, 1);
+        
+        // Reset zoom factor to 1 on load
+        win.webContents.on('did-finish-load', () => {
+          win.webContents.setZoomFactor(1);
+        });
+        
+        win.webContents.setWindowOpenHandler(({ url: extUrl }) => {
+          if (extUrl.startsWith('http://localhost') || extUrl.startsWith('http://127.0.0.1')) {
+            return { action: 'allow' };
+          }
+          shell.openExternal(extUrl).catch(err => {
+            console.error(`Failed to open external URL: ${err.message}`);
+          });
+          return { action: 'deny' };
+        });
+      };
+      
+      if (electronApp.isReady()) {
+        loadWindow();
+      } else {
+        electronApp.whenReady().then(loadWindow);
+      }
+    } else {
+      openBrowser(`http://localhost:${PORT}`);
+      setTimeout(() => {
+        process.exit(0);
+      }, 1000);
+    }
   } else {
     console.error('Server error:', err);
   }

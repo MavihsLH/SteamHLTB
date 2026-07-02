@@ -33,12 +33,30 @@ const hltbTimeCategory = document.getElementById('hltb-time-category');
 const hltbMinTime = document.getElementById('hltb-min-time');
 const hltbMaxTime = document.getElementById('hltb-max-time');
 
-// Theme: Apply saved preference immediately to avoid flash of wrong theme
+// Theme and Electron environment: Apply preferences immediately to avoid flash
 (function() {
   const saved = localStorage.getItem('theme');
   if (saved === 'dark') {
     document.documentElement.setAttribute('data-theme', 'dark');
   }
+  
+  // Detect if running under Electron
+  const isElectron = navigator.userAgent.toLowerCase().includes('electron');
+  if (isElectron) {
+    document.documentElement.classList.add('is-electron');
+  }
+
+  // Disable keyboard zoom (Ctrl+/Ctrl-/Ctrl0) and mouse wheel zoom
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && (e.key === '=' || e.key === '-' || e.key === '+' || e.key === '0')) {
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+    }
+  }, { passive: false });
 })();
 
 // Initialize App
@@ -89,6 +107,50 @@ function setupEventListeners() {
       }
     });
   }
+
+  // Settings Modal Listeners
+  const settingsBtn = document.getElementById('settings-btn');
+  const closeSettingsBtn = document.getElementById('close-settings-btn');
+  const settingsModal = document.getElementById('settings-modal');
+  const settingsForm = document.getElementById('settings-form');
+  
+  if (settingsBtn && settingsModal) {
+    settingsBtn.addEventListener('click', openSettingsModal);
+  }
+  if (closeSettingsBtn && settingsModal) {
+    closeSettingsBtn.addEventListener('click', () => {
+      settingsModal.style.display = 'none';
+    });
+  }
+  if (settingsForm) {
+    settingsForm.addEventListener('submit', handleSettingsSave);
+  }
+
+  // Suggest Next Game Listener
+  const suggestNextBtn = document.getElementById('suggest-next-btn');
+  if (suggestNextBtn) {
+    suggestNextBtn.addEventListener('click', suggestNextGame);
+  }
+
+  // Detail Panel Listeners
+  const closeDetailBtn = document.getElementById('close-detail-btn');
+  const panelOverlay = document.getElementById('panel-overlay');
+  const detailPanel = document.getElementById('game-detail-panel');
+  
+  if (closeDetailBtn && detailPanel) {
+    closeDetailBtn.addEventListener('click', closeGameDetail);
+  }
+  if (panelOverlay && detailPanel) {
+    panelOverlay.addEventListener('click', closeGameDetail);
+  }
+
+  // Close modals on Escape key
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (settingsModal) settingsModal.style.display = 'none';
+      closeGameDetail();
+    }
+  });
 }
 
 // Theme Toggle: Switch between light (Y2K Aero) and dark (Retro Pixel)
@@ -331,6 +393,9 @@ function updateStats() {
     return playHours > 0 && storyHours > 0 && playHours >= storyHours;
   }).length;
   statCompletedGames.textContent = completedCount;
+
+  // Update insights
+  computeInsights();
 }
 
 // Handle Search and Filter logic combined
@@ -436,92 +501,7 @@ function renderGrid() {
     return;
   }
   
-  gamesGrid.innerHTML = filteredGames.map(game => {
-    const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
-    
-    // Check if beaten
-    let isBeaten = false;
-    if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
-      isBeaten = (game.playtime_forever / 60) >= game.hltb.gameplayMain;
-    }
-    
-    // Image element with error handler
-    const imgUrl = game.appid 
-      ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`
-      : '';
-      
-    // Badges
-    const ownerBadge = game.is_owned 
-      ? `<span class="owner-badge owned"><i class="fa-solid fa-user"></i> Owned</span>`
-      : `<span class="owner-badge shared"><i class="fa-solid fa-people-group"></i> Borrowed</span>`;
-      
-    const beatBadge = isBeaten 
-      ? `<div class="status-indicator"><span class="beat-badge"><i class="fa-solid fa-circle-check"></i> Beat It</span></div>`
-      : '';
-      
-    // HLTB Content
-    let hltbContent = '';
-    if (game.hltbLoading) {
-      hltbContent = `
-        <div class="hltb-loading-placeholder">
-          <i class="fa-solid fa-circle-notch fa-spin"></i>
-          <span>Retrieving times...</span>
-        </div>
-      `;
-    } else if (game.hltbError) {
-      hltbContent = `
-        <div class="hltb-not-found">
-          <i class="fa-solid fa-circle-exclamation"></i> HLTB error
-        </div>
-      `;
-    } else if (game.hltb === null) {
-      hltbContent = `
-        <div class="hltb-not-found">
-          <i class="fa-solid fa-circle-minus"></i> No HLTB data
-        </div>
-      `;
-    } else if (game.hltb.notFound) {
-      hltbContent = `
-        <div class="hltb-not-found">
-          <i class="fa-solid fa-ban"></i> No HLTB times found
-        </div>
-      `;
-    } else {
-      hltbContent = `
-        <div class="hltb-grid">
-          <div class="hltb-metric main" title="Main Story">
-            <span class="metric-label">Main</span>
-            <span class="metric-value">${game.hltb.gameplayMain}h</span>
-          </div>
-          <div class="hltb-metric extra" title="Main + Extra Content">
-            <span class="metric-label">Extra</span>
-            <span class="metric-value">${game.hltb.gameplayMainExtra}h</span>
-          </div>
-          <div class="hltb-metric completionist" title="100% Completionist">
-            <span class="metric-label">100%</span>
-            <span class="metric-value">${game.hltb.gameplayCompletionist}h</span>
-          </div>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="game-card ${isBeaten ? 'beaten' : ''}" data-appid="${game.appid}">
-        ${ownerBadge}
-        ${beatBadge}
-        <div class="card-screw screw-bl"></div>
-        <div class="card-screw screw-br"></div>
-        <div class="card-header-img">
-          <img src="${imgUrl}" alt="${escapeHtml(game.name)}" loading="lazy" onerror="handleImageError(this, '${escapeHtml(game.name)}')">
-          <span class="playtime-badge"><i class="fa-solid fa-clock"></i> ${playHours} hrs</span>
-        </div>
-        <div class="card-content">
-          <h3 class="game-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</h3>
-          ${hltbContent}
-        </div>
-      </div>
-    `;
-  }).join('');
+  gamesGrid.innerHTML = filteredGames.map(game => createCardHtml(game)).join('');
 }
 
 // Client Side Game Cover Fallback Generator
@@ -718,86 +698,10 @@ function updateGameInUI(game) {
   
   if (!card) return;
   
-  // Check if beaten
-  let isBeaten = false;
-  if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
-    isBeaten = (game.playtime_forever / 60) >= game.hltb.gameplayMain;
-  }
-  
-  // Update beat classes
-  if (isBeaten) {
-    card.classList.add('beaten');
-    // Ensure "Beat It" badge is present
-    if (!card.querySelector('.beat-badge')) {
-      const indicator = document.createElement('div');
-      indicator.className = 'status-indicator';
-      indicator.innerHTML = '<span class="beat-badge"><i class="fa-solid fa-circle-check"></i> Beat It</span>';
-      card.appendChild(indicator);
-    }
-  } else {
-    card.classList.remove('beaten');
-    const indicator = card.querySelector('.status-indicator');
-    if (indicator) indicator.remove();
-  }
-  
-  // Update HLTB Container inside Card
-  const cardContent = card.querySelector('.card-content');
-  const oldHltbGrid = cardContent.querySelector('.hltb-grid') || 
-                      cardContent.querySelector('.hltb-loading-placeholder') ||
-                      cardContent.querySelector('.hltb-not-found');
-                      
-  if (oldHltbGrid) {
-    let newHltbHtml = '';
-    if (game.hltbLoading) {
-      newHltbHtml = `
-        <div class="hltb-loading-placeholder">
-          <i class="fa-solid fa-circle-notch fa-spin"></i>
-          <span>Retrieving times...</span>
-        </div>
-      `;
-    } else if (game.hltbError) {
-      newHltbHtml = `
-        <div class="hltb-not-found">
-          <i class="fa-solid fa-circle-exclamation"></i> HLTB error
-        </div>
-      `;
-    } else if (game.hltb === null) {
-      newHltbHtml = `
-        <div class="hltb-not-found">
-          <i class="fa-solid fa-circle-minus"></i> No HLTB data
-        </div>
-      `;
-    } else if (game.hltb.notFound) {
-      newHltbHtml = `
-        <div class="hltb-not-found">
-          <i class="fa-solid fa-ban"></i> No HLTB times found
-        </div>
-      `;
-    } else {
-      newHltbHtml = `
-        <div class="hltb-grid">
-          <div class="hltb-metric main" title="Main Story">
-            <span class="metric-label">Main</span>
-            <span class="metric-value">${game.hltb.gameplayMain}h</span>
-          </div>
-          <div class="hltb-metric extra" title="Main + Extra Content">
-            <span class="metric-label">Extra</span>
-            <span class="metric-value">${game.hltb.gameplayMainExtra}h</span>
-          </div>
-          <div class="hltb-metric completionist" title="100% Completionist">
-            <span class="metric-label">100%</span>
-            <span class="metric-value">${game.hltb.gameplayCompletionist}h</span>
-          </div>
-        </div>
-      `;
-    }
-    
-    // Replace old HTML with new HTML
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = newHltbHtml.trim();
-    const newHltbNode = tempDiv.firstChild;
-    oldHltbGrid.replaceWith(newHltbNode);
-  }
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = createCardHtml(game).trim();
+  const newCard = tempDiv.firstChild;
+  card.replaceWith(newCard);
 }
 
 // Helpers
@@ -813,6 +717,92 @@ function debounce(func, wait) {
   };
 }
 
+const ENDLESS_GAMES_BLOCKLIST = [
+  'team fortress 2',
+  'counter-strike',
+  'counter-strike 2',
+  'counter-strike: global offensive',
+  'dota 2',
+  'pubg: battlegrounds',
+  'apex legends',
+  'destiny 2',
+  'warframe',
+  'rust',
+  'garry\'s mod',
+  'gmod',
+  'left 4 dead',
+  'left 4 dead 2',
+  'dead by daylight',
+  'payday 2',
+  'payday 3',
+  'valorant',
+  'league of legends',
+  'world of warcraft',
+  'overwatch',
+  'overwatch 2',
+  'tft',
+  'teamfight tactics',
+  'hearthstone',
+  'brawlhalla',
+  'rocket league',
+  'smite',
+  'paladins',
+  'vrchat',
+  'terraria',
+  'minecraft',
+  'subnautica',
+  'factorio',
+  'satisfactory',
+  'rimworld',
+  'civilization v',
+  'civilization vi',
+  'sid meier\'s civilization',
+  'hearts of iron iv',
+  'stellaris',
+  'crusader kings iii',
+  'europa universalis iv',
+  'the sims',
+  'the sims 3',
+  'the sims 4',
+  'stardew valley',
+  'cities: skylines',
+  'cities: skylines ii',
+  'euro truck simulator 2',
+  'american truck simulator',
+  'assetto corsa',
+  'iracing',
+  'dead island',
+  'dead island 2',
+  'killing floor',
+  'killing floor 2'
+];
+
+function isEndlessOrMultiplayer(gameName) {
+  const nameLower = gameName.toLowerCase().trim();
+  
+  if (ENDLESS_GAMES_BLOCKLIST.some(blocked => nameLower === blocked || nameLower.includes(blocked))) {
+    return true;
+  }
+  
+  const keywords = [
+    'dedicated server', 
+    'test server', 
+    'public test', 
+    'beta', 
+    'demo', 
+    'benchmarking', 
+    'tool', 
+    'sdk',
+    'soundtrack',
+    'multiplayer'
+  ];
+  if (keywords.some(kw => nameLower.includes(kw))) {
+    return true;
+  }
+  
+  return false;
+}
+
 function escapeHtml(str) {
   if (!str) return '';
   return str
@@ -821,4 +811,430 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// Generates game card HTML with owner badge, beat status, and HLTB completion ring
+function createCardHtml(game) {
+  const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
+  
+  // Check if beaten
+  let isBeaten = false;
+  if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
+    isBeaten = (game.playtime_forever / 60) >= game.hltb.gameplayMain;
+  }
+  
+  // Image element
+  const imgUrl = game.appid 
+    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`
+    : '';
+    
+  // Badges
+  const ownerBadge = game.is_owned 
+    ? `<span class="owner-badge owned"><i class="fa-solid fa-user"></i> Owned</span>`
+    : `<span class="owner-badge shared"><i class="fa-solid fa-people-group"></i> Borrowed</span>`;
+    
+  // Calculate progress ring
+  let progressRingHtml = '';
+  if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
+    const playHrs = (game.playtime_forever || 0) / 60;
+    const mainHrs = game.hltb.gameplayMain;
+    const pct = Math.min(100, Math.round((playHrs / mainHrs) * 100));
+    
+    const radius = 13;
+    const circumference = 2 * Math.PI * radius; // ~81.68
+    const strokeDashoffset = circumference - (pct / 100) * circumference;
+    
+    let ringClass = 'ring-started';
+    if (pct >= 100) {
+      ringClass = 'ring-completed';
+    } else if (pct >= 50) {
+      ringClass = 'ring-half';
+    }
+    
+    const ringText = pct >= 100 ? '<i class="fa-solid fa-check" style="color: #166534;"></i>' : `${pct}%`;
+    
+    progressRingHtml = `
+      <div class="progress-ring-badge ${ringClass}" title="Completion: ${pct}%" onclick="event.stopPropagation(); openGameDetail(${game.appid});">
+        <svg width="34" height="34">
+          <circle class="ring-track" cx="17" cy="17" r="13"></circle>
+          <circle class="ring-fill" cx="17" cy="17" r="13" 
+            stroke-dasharray="${circumference}" 
+            stroke-dashoffset="${strokeDashoffset}"></circle>
+        </svg>
+        <span class="ring-text">${ringText}</span>
+      </div>
+    `;
+  }
+  
+  // HLTB Content
+  let hltbContent = '';
+  if (game.hltbLoading) {
+    hltbContent = `
+      <div class="hltb-loading-placeholder">
+        <i class="fa-solid fa-circle-notch fa-spin"></i>
+        <span>Retrieving times...</span>
+      </div>
+    `;
+  } else if (game.hltbError) {
+    hltbContent = `
+      <div class="hltb-not-found">
+        <i class="fa-solid fa-circle-exclamation"></i> HLTB error
+      </div>
+    `;
+  } else if (game.hltb === null) {
+    hltbContent = `
+      <div class="hltb-not-found">
+        <i class="fa-solid fa-circle-minus"></i> No HLTB data
+      </div>
+    `;
+  } else if (game.hltb.notFound) {
+    hltbContent = `
+      <div class="hltb-not-found">
+        <i class="fa-solid fa-ban"></i> No HLTB times found
+      </div>
+    `;
+  } else {
+    hltbContent = `
+      <div class="hltb-grid">
+        <div class="hltb-metric main" title="Main Story">
+          <span class="metric-label">Main</span>
+          <span class="metric-value">${game.hltb.gameplayMain}h</span>
+        </div>
+        <div class="hltb-metric extra" title="Main + Extra Content">
+          <span class="metric-label">Extra</span>
+          <span class="metric-value">${game.hltb.gameplayMainExtra}h</span>
+        </div>
+        <div class="hltb-metric completionist" title="100% Completionist">
+          <span class="metric-label">100%</span>
+          <span class="metric-value">${game.hltb.gameplayCompletionist}h</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="game-card ${isBeaten ? 'beaten' : ''}" data-appid="${game.appid}" onclick="openGameDetail(${game.appid})">
+      ${ownerBadge}
+      <div class="card-screw screw-bl"></div>
+      <div class="card-screw screw-br"></div>
+      <div class="card-header-img">
+        <img src="${imgUrl}" alt="${escapeHtml(game.name)}" loading="lazy" onerror="handleImageError(this, '${escapeHtml(game.name)}')">
+        <span class="playtime-badge"><i class="fa-solid fa-clock"></i> ${playHours} hrs</span>
+        ${progressRingHtml}
+      </div>
+      <div class="card-content">
+        <h3 class="game-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</h3>
+        ${hltbContent}
+      </div>
+    </div>
+  `;
+}
+
+// Compute and render insights panel data
+function computeInsights() {
+  const insightsSection = document.getElementById('insights-section');
+  if (!insightsSection) return;
+  
+  if (games.length === 0) {
+    insightsSection.style.display = 'none';
+    return;
+  }
+  
+  insightsSection.style.display = 'block';
+  
+  // 1. Backlog Games & Hours (Owned games that are not completed or unplayed)
+  const backlogGames = games.filter(g => {
+    if (!g.is_owned) return false;
+    if (isEndlessOrMultiplayer(g.name)) return false;
+    if (!g.hltb || g.hltb.notFound) return g.playtime_forever === 0;
+    const playHours = (g.playtime_forever || 0) / 60;
+    return playHours < (g.hltb.gameplayMain || 1);
+  });
+  
+  const backlogCount = backlogGames.length;
+  const backlogHours = Math.round(backlogGames.reduce((sum, g) => {
+    const playHours = (g.playtime_forever || 0) / 60;
+    const hltbHours = (g.hltb && !g.hltb.notFound) ? (g.hltb.gameplayMain || 0) : 0;
+    const remaining = Math.max(0, hltbHours - playHours);
+    return sum + (remaining || 10); // default to 10h if no HLTB data
+  }, 0));
+  
+  document.getElementById('insight-backlog-games').textContent = `${backlogCount} Games`;
+  document.getElementById('insight-backlog-hours').textContent = `${backlogHours.toLocaleString()}h remaining`;
+  
+  // 2. Clearance Estimate (At average of 5 hours per week)
+  const hrsPerWeek = 5;
+  const weeksToClear = backlogHours / hrsPerWeek;
+  const monthsToClear = Math.ceil(weeksToClear / 4.33);
+  
+  let clearText = '-';
+  if (backlogHours === 0) {
+    clearText = 'Backlog cleared!';
+  } else if (monthsToClear < 1) {
+    clearText = '< 1 month';
+  } else if (monthsToClear === 1) {
+    clearText = '1 month';
+  } else {
+    clearText = `~${monthsToClear} months`;
+  }
+  document.getElementById('insight-clear-time').textContent = clearText;
+  
+  // 3. Neglected Backlog Gem (Owned game, 0 playtime, longest HLTB gameplayMain)
+  const unplayedOwned = games.filter(g => g.is_owned && (g.playtime_forever || 0) === 0 && g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0 && !isEndlessOrMultiplayer(g.name));
+  const gemElement = document.getElementById('insight-neglected-name');
+  if (unplayedOwned.length > 0) {
+    unplayedOwned.sort((a, b) => b.hltb.gameplayMain - a.hltb.gameplayMain);
+    const gem = unplayedOwned[0];
+    gemElement.textContent = gem.name;
+    gemElement.title = `Click to view details for ${gem.name}`;
+    gemElement.className = 'insight-clickable-link';
+    gemElement.onclick = () => openGameDetail(gem.appid);
+    document.getElementById('insight-neglected-time').textContent = `${gem.hltb.gameplayMain}h main story`;
+  } else {
+    gemElement.textContent = 'None found';
+    gemElement.className = '';
+    gemElement.onclick = null;
+    gemElement.title = '';
+    document.getElementById('insight-neglected-time').textContent = 'All owned games played!';
+  }
+}
+
+// Suggest a random backlog game weighted by shortest HLTB time (gamification!)
+function suggestNextGame() {
+  const backlogGames = filteredGames.filter(g => {
+    if (!g.is_owned) return false;
+    if (isEndlessOrMultiplayer(g.name)) return false;
+    const playHours = (g.playtime_forever || 0) / 60;
+    const isCompleted = g.hltb && !g.hltb.notFound && playHours >= g.hltb.gameplayMain;
+    return !isCompleted && g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0;
+  });
+  
+  const resultDiv = document.getElementById('suggestion-result');
+  const btn = document.getElementById('suggest-next-btn');
+  
+  if (backlogGames.length === 0) {
+    btn.textContent = 'No options!';
+    resultDiv.style.display = 'none';
+    return;
+  }
+  
+  // Weighted selection: weight = 100 / gameplayMain (shorter games have higher weight)
+  let totalWeight = 0;
+  const weightedList = backlogGames.map(g => {
+    const weight = 100 / (g.hltb.gameplayMain || 1);
+    totalWeight += weight;
+    return { game: g, weight };
+  });
+  
+  let randomVal = Math.random() * totalWeight;
+  let selected = backlogGames[0];
+  
+  for (const item of weightedList) {
+    randomVal -= item.weight;
+    if (randomVal <= 0) {
+      selected = item.game;
+      break;
+    }
+  }
+  
+  if (selected) {
+    const nameElement = document.getElementById('suggested-game-name');
+    nameElement.textContent = selected.name;
+    nameElement.title = `Click to view details for ${selected.name}`;
+    nameElement.className = 'insight-clickable-link';
+    nameElement.onclick = () => openGameDetail(selected.appid);
+    
+    document.getElementById('suggested-game-time').textContent = `Main Story: ${selected.hltb.gameplayMain}h`;
+    
+    btn.textContent = 'Roll Again 🎲';
+    resultDiv.style.display = 'block';
+  }
+}
+
+// Settings Modal functions
+async function openSettingsModal() {
+  const modal = document.getElementById('settings-modal');
+  if (!modal) return;
+  
+  modal.style.display = 'flex';
+  
+  try {
+    const res = await fetch('/api/config');
+    if (!res.ok) throw new Error('Failed to fetch settings');
+    const data = await res.json();
+    
+    const apiKeyInput = document.getElementById('settings-api-key');
+    const steamIdInput = document.getElementById('settings-steam-id');
+    const familyIdsInput = document.getElementById('settings-family-ids');
+    
+    if (apiKeyInput) {
+      apiKeyInput.value = data.STEAM_API_KEY_MASKED || '';
+      apiKeyInput.placeholder = data.STEAM_API_KEY_SET ? '••••••••••••••••••••••••••••••••' : 'Enter Steam Web API Key';
+    }
+    if (steamIdInput) {
+      steamIdInput.value = data.STEAM_ID || '';
+    }
+    if (familyIdsInput) {
+      familyIdsInput.value = (data.FAMILY_STEAM_IDS || []).join(', ');
+    }
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+  }
+}
+
+async function handleSettingsSave(e) {
+  e.preventDefault();
+  
+  const apiKey = document.getElementById('settings-api-key').value.trim();
+  const steamId = document.getElementById('settings-steam-id').value.trim();
+  const familyIdsStr = document.getElementById('settings-family-ids').value.trim();
+  
+  const familyIds = familyIdsStr ? familyIdsStr.split(',').map(id => id.trim()).filter(Boolean) : [];
+  
+  const saveBtn = document.getElementById('save-settings-btn');
+  const originalHtml = saveBtn.innerHTML;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+  
+  try {
+    const payload = {
+      STEAM_ID: steamId,
+      FAMILY_STEAM_IDS: familyIds
+    };
+    
+    if (apiKey && !apiKey.includes('•')) {
+      payload.STEAM_API_KEY = apiKey;
+    }
+    
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to save settings');
+    }
+    
+    document.getElementById('settings-modal').style.display = 'none';
+    fetchLibrary();
+  } catch (err) {
+    console.error('Failed to save settings:', err);
+    alert(`Failed to save settings: ${err.message}`);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = originalHtml;
+  }
+}
+
+// Game Detail slide-out functions
+function openGameDetail(appid) {
+  const game = games.find(g => g.appid === Number(appid));
+  if (!game) return;
+  
+  const panel = document.getElementById('game-detail-panel');
+  const overlay = document.getElementById('panel-overlay');
+  if (!panel || !overlay) return;
+  
+  const imgUrl = game.appid 
+    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`
+    : '';
+  
+  document.getElementById('detail-cover').src = imgUrl;
+  document.getElementById('detail-cover').onerror = function() {
+    this.src = '';
+    this.style.display = 'none';
+    let textFallback = this.nextElementSibling;
+    if (!textFallback || !textFallback.classList.contains('detail-cover-fallback')) {
+      textFallback = document.createElement('div');
+      textFallback.className = 'detail-cover-fallback';
+      textFallback.style.cssText = `
+        height: 120px;
+        background: linear-gradient(135deg, #1d2636 0%, #0f141d 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-display);
+        font-weight: 700;
+        color: var(--text-secondary);
+        padding: 1rem;
+        text-align: center;
+      `;
+      this.parentElement.appendChild(textFallback);
+    }
+    textFallback.textContent = game.name;
+    textFallback.style.display = 'flex';
+  };
+  
+  const fallback = document.querySelector('.detail-cover-fallback');
+  if (fallback) fallback.style.display = 'none';
+  document.getElementById('detail-cover').style.display = 'block';
+  
+  const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
+  document.getElementById('detail-playtime-badge').innerHTML = `<i class="fa-solid fa-clock"></i> ${playHours} hrs`;
+  document.getElementById('detail-title').textContent = game.name;
+  
+  const ownerBadgeContainer = document.getElementById('detail-owner-badge');
+  ownerBadgeContainer.innerHTML = game.is_owned 
+    ? `<span class="owner-badge owned"><i class="fa-solid fa-user"></i> Owned</span>`
+    : `<span class="owner-badge shared"><i class="fa-solid fa-people-group"></i> Borrowed</span>`;
+    
+  if (!game.is_owned) {
+    const ownerSubtext = document.createElement('span');
+    ownerSubtext.className = 'detail-owner-subtext';
+    ownerSubtext.textContent = ` (Family Shared)`;
+    ownerBadgeContainer.appendChild(ownerSubtext);
+  }
+  
+  document.getElementById('detail-steam-link').href = `steam://store/${game.appid}`;
+  document.getElementById('detail-steam-link').setAttribute('data-web-url', `https://store.steampowered.com/app/${game.appid}`);
+  
+  const loading = document.getElementById('detail-hltb-loading');
+  const error = document.getElementById('detail-hltb-error');
+  const none = document.getElementById('detail-hltb-none');
+  const stats = document.getElementById('detail-hltb-stats');
+  const hltbLink = document.getElementById('detail-hltb-link');
+  
+  loading.style.display = 'none';
+  error.style.display = 'none';
+  none.style.display = 'none';
+  stats.style.display = 'none';
+  hltbLink.style.display = 'none';
+  
+  if (game.hltbLoading) {
+    loading.style.display = 'block';
+  } else if (game.hltbError) {
+    error.style.display = 'block';
+  } else if (game.hltb === null || game.hltb.notFound) {
+    none.style.display = 'block';
+  } else {
+    stats.style.display = 'block';
+    hltbLink.style.display = 'inline-flex';
+    hltbLink.href = `https://howlongtobeat.com/game/${game.hltb.hltbId}`;
+    
+    document.getElementById('detail-time-main').textContent = `${game.hltb.gameplayMain}h`;
+    document.getElementById('detail-time-extra').textContent = `${game.hltb.gameplayMainExtra}h`;
+    document.getElementById('detail-time-completionist').textContent = `${game.hltb.gameplayCompletionist}h`;
+    
+    const hoursPlayed = (game.playtime_forever || 0) / 60;
+    
+    const pctMain = game.hltb.gameplayMain > 0 ? Math.min(100, (hoursPlayed / game.hltb.gameplayMain) * 100) : 0;
+    const pctExtra = game.hltb.gameplayMainExtra > 0 ? Math.min(100, (hoursPlayed / game.hltb.gameplayMainExtra) * 100) : 0;
+    const pctComp = game.hltb.gameplayCompletionist > 0 ? Math.min(100, (hoursPlayed / game.hltb.gameplayCompletionist) * 100) : 0;
+    
+    document.getElementById('detail-progress-main').style.width = `${pctMain}%`;
+    document.getElementById('detail-progress-extra').style.width = `${pctExtra}%`;
+    document.getElementById('detail-progress-completionist').style.width = `${pctComp}%`;
+  }
+  
+  panel.classList.add('open');
+  overlay.classList.add('active');
+}
+
+function closeGameDetail() {
+  const panel = document.getElementById('game-detail-panel');
+  const overlay = document.getElementById('panel-overlay');
+  if (panel) panel.classList.remove('open');
+  if (overlay) overlay.classList.remove('active');
 }

@@ -6,8 +6,10 @@
   "bin": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:electron": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:exe": "pkg . --targets node22-win-x64 --output steam-hltb-app.exe"
+    "build:exe": "pkg . --targets node22-win-x64 --output steam-hltb-app.exe",
+    "build:electron": "electron-packager . SteamHLTB --platform=win32 --arch=x64 --out=dist --overwrite --icon=static/img/SteamHLTB-dark-transparent.png && node -e \"const fs=require('fs'); ['config.json', 'db.json'].forEach(f => { if(fs.existsSync(f)) fs.copyFileSync(f, 'dist/SteamHLTB-win32-x64/' + f); })\""
   },
   "keywords": [],
   "author": "",
@@ -18,7 +20,9 @@
     "howlongtobeat": "^1.8.0"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^6.20.0"
+    "@yao-pkg/pkg": "^6.20.0",
+    "electron": "^31.0.0",
+    "electron-packager": "^17.1.2"
   },
   "pkg": {
     "assets": [

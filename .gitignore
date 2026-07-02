@@ -4,3 +4,5 @@ config.json
 .DS_Store
 db.json
 steam-hltb-app.exe
+dist/
+
