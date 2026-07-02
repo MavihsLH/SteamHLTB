@@ -696,7 +696,7 @@ app.use(express.static(path.join(__dirname, 'static')));
 
 // Fallback for SPA or simple index
 app.get('/{*splat}', (req, res) => {
-  res.sendFile(path.join(__dirname, 'static', 'html', 'index.html'));
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
 });
 
 function openBrowser(url) {

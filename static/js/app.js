@@ -6,6 +6,8 @@ let currentSort = 'playtime_desc';
 let hltbSyncQueue = [];
 let activeSyncWorkers = 0;
 const MAX_CONCURRENT_SYNC = 4; // limit concurrent HLTB requests to avoid throttling
+let visibleCardCount = 40;
+const BATCH_SIZE = 40;
 
 // DOM Elements
 const configStatus = document.getElementById('config-status');
@@ -179,6 +181,13 @@ function setupEventListeners() {
       if (settingsModal) settingsModal.style.display = 'none';
       if (syncModal) syncModal.style.display = 'none';
       closeGameDetail();
+    }
+  });
+
+  // Infinite scroll listener to load games in batches as user scrolls down
+  window.addEventListener('scroll', () => {
+    if ((window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 300)) {
+      loadNextGamesBatch();
     }
   });
 }
@@ -541,7 +550,28 @@ function renderGrid() {
     return;
   }
   
-  gamesGrid.innerHTML = filteredGames.map(game => createCardHtml(game)).join('');
+  // Reset scroll page limit for new renders
+  visibleCardCount = BATCH_SIZE;
+  
+  // Render only the first batch of games
+  const batch = filteredGames.slice(0, visibleCardCount);
+  gamesGrid.innerHTML = batch.map(game => createCardHtml(game)).join('');
+}
+
+// Load the next batch of games for infinite scrolling
+function loadNextGamesBatch() {
+  if (visibleCardCount >= filteredGames.length) return;
+  
+  const nextBatch = filteredGames.slice(visibleCardCount, visibleCardCount + BATCH_SIZE);
+  visibleCardCount += BATCH_SIZE;
+  
+  // Create elements and append
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = nextBatch.map(game => createCardHtml(game)).join('');
+  
+  while (tempDiv.firstChild) {
+    gamesGrid.appendChild(tempDiv.firstChild);
+  }
 }
 
 // Client Side Game Cover Fallback Generator

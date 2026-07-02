@@ -16,10 +16,13 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "express": "^5.2.1",
     "howlongtobeat": "^1.8.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@yao-pkg/pkg": "^6.20.0",
     "electron": "^31.0.0",
     "electron-packager": "^17.1.2"
