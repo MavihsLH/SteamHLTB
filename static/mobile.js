@@ -9,6 +9,7 @@ const MAX_CONCURRENT_SYNC = 4;
 let visibleCardCount = 40;
 const BATCH_SIZE = 40;
 let manuallyCompleted = new Set(); // appids the user has manually marked as beaten
+let manuallyUnbeaten = new Set(); // appids the user has manually marked as NOT beaten
 
 const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
@@ -93,23 +94,32 @@ async function saveMobileLibrary(libraryData) {
   await Preferences.set({ key: 'library', value: JSON.stringify(libraryData) });
 }
 
-async function loadManuallyCompleted() {
+async function loadManualBeatenSets() {
   if (!isMobileApp) return;
   const { Preferences } = window.Capacitor.Plugins;
   try {
-    const { value } = await Preferences.get({ key: 'manuallyCompleted' });
-    if (value) {
-      manuallyCompleted = new Set(JSON.parse(value));
+    const resComp = await Preferences.get({ key: 'manuallyCompleted' });
+    if (resComp.value) {
+      manuallyCompleted = new Set(JSON.parse(resComp.value));
+    }
+    const resUncomp = await Preferences.get({ key: 'manuallyUnbeaten' });
+    if (resUncomp.value) {
+      manuallyUnbeaten = new Set(JSON.parse(resUncomp.value));
     }
   } catch (err) {
-    console.error('Error reading manuallyCompleted:', err);
+    console.error('Error reading manual beaten/unbeaten sets:', err);
   }
 }
 
-async function saveManuallyCompleted() {
+async function saveManualBeatenSets() {
   if (!isMobileApp) return;
   const { Preferences } = window.Capacitor.Plugins;
-  await Preferences.set({ key: 'manuallyCompleted', value: JSON.stringify([...manuallyCompleted]) });
+  try {
+    await Preferences.set({ key: 'manuallyCompleted', value: JSON.stringify([...manuallyCompleted]) });
+    await Preferences.set({ key: 'manuallyUnbeaten', value: JSON.stringify([...manuallyUnbeaten]) });
+  } catch (err) {
+    console.error('Error saving manual beaten/unbeaten sets:', err);
+  }
 }
 
 // ============================================================================
@@ -117,6 +127,7 @@ async function saveManuallyCompleted() {
 // ============================================================================
 
 function isGameBeaten(game) {
+  if (manuallyUnbeaten.has(game.appid)) return false;
   if (manuallyCompleted.has(game.appid)) return true;
   if (!game.hltb || game.hltb.notFound) return false;
   const playHours = (game.playtime_forever || 0) / 60;
@@ -309,10 +320,62 @@ async function fetchHltbData(game) {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadManuallyCompleted();
+  await loadManualBeatenSets();
   await fetchLibrary();
   setupEventListeners();
+  
+  // Register touch-swipe-to-close behavior on bottom sheets
+  makeBottomSheetSwipable('mobile-settings-overlay', '.bottom-sheet-content');
+  makeBottomSheetSwipable('mobile-details-overlay', '.bottom-sheet-content');
+  makeBottomSheetSwipable('mobile-sync-modal', '.bottom-sheet-content');
+  makeBottomSheetSwipable('mobile-dice-modal', '.bottom-sheet-content');
+  makeBottomSheetSwipable('mobile-first-sync-overlay', '.bottom-sheet-content');
 });
+
+function makeBottomSheetSwipable(overlayId, contentSelector) {
+  const overlay = document.getElementById(overlayId);
+  if (!overlay) return;
+  const content = overlay.querySelector(contentSelector);
+  if (!content) return;
+
+  let startY = 0;
+  let currentY = 0;
+  let isDragging = false;
+
+  content.addEventListener('touchstart', (e) => {
+    const scrollable = content.querySelector('.details-sheet-scrollable');
+    if (scrollable && scrollable.scrollTop > 0) {
+      return;
+    }
+    startY = e.touches[0].clientY;
+    isDragging = true;
+    content.style.transition = 'none';
+  }, { passive: true });
+
+  content.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    currentY = e.touches[0].clientY;
+    const deltaY = currentY - startY;
+    if (deltaY > 0) {
+      content.style.transform = `translateY(${deltaY}px)`;
+    } else {
+      content.style.transform = '';
+    }
+  }, { passive: true });
+
+  content.addEventListener('touchend', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    content.style.transition = 'transform 0.3s cubic-bezier(0.1, 0.76, 0.55, 0.94)';
+    const deltaY = currentY - startY;
+    if (deltaY > 120) {
+      overlay.style.display = 'none';
+    }
+    content.style.transform = '';
+    startY = 0;
+    currentY = 0;
+  });
+}
 
 async function fetchLibrary() {
   try {
@@ -794,29 +857,33 @@ function openGameDetailsSheet(appid) {
   statusEl.textContent = beaten ? 'Beaten ✓' : (parseFloat(playHours) > 0.1 ? 'In Progress' : 'Not Started');
   statusEl.style.color = beaten ? 'var(--accent-green)' : 'var(--text-primary)';
   
-  // Mark as complete button
+  // Mark as complete / override button
   const markBtn = document.getElementById('details-mark-complete-btn');
   if (markBtn) {
     if (beaten) {
-      if (manuallyCompleted.has(game.appid)) {
-        markBtn.textContent = 'Unmark as Beaten';
-        markBtn.style.display = 'block';
-        markBtn.onclick = async () => {
+      markBtn.textContent = 'Unmark as Beaten (Keep In Progress)';
+      markBtn.style.display = 'block';
+      markBtn.onclick = async () => {
+        if (manuallyCompleted.has(game.appid)) {
           manuallyCompleted.delete(game.appid);
-          await saveManuallyCompleted();
-          updateStats();
-          handleSearchAndFilter();
-          openGameDetailsSheet(appid); // refresh the sheet
-        };
-      } else {
-        markBtn.style.display = 'none'; // auto-beaten, no need for button
-      }
+        } else {
+          manuallyUnbeaten.add(game.appid);
+        }
+        await saveManualBeatenSets();
+        updateStats();
+        handleSearchAndFilter();
+        openGameDetailsSheet(appid);
+      };
     } else {
       markBtn.textContent = 'Mark as Beaten';
       markBtn.style.display = 'block';
       markBtn.onclick = async () => {
-        manuallyCompleted.add(game.appid);
-        await saveManuallyCompleted();
+        if (manuallyUnbeaten.has(game.appid)) {
+          manuallyUnbeaten.delete(game.appid);
+        } else {
+          manuallyCompleted.add(game.appid);
+        }
+        await saveManualBeatenSets();
         updateStats();
         handleSearchAndFilter();
         openGameDetailsSheet(appid);
@@ -861,7 +928,15 @@ function triggerDicePickerMobile() {
   document.getElementById('dice-game-title').textContent = game.name;
   document.getElementById('dice-playtime-val').textContent = `${playHours}h`;
   document.getElementById('dice-hltb-main-val').textContent = mainHrs;
-  document.getElementById('dice-game-img').src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
+  
+  const diceImg = document.getElementById('dice-game-img');
+  if (diceImg) {
+    diceImg.style.display = 'block';
+    diceImg.src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
+    diceImg.onerror = () => {
+      diceImg.style.display = 'none';
+    };
+  }
   
   document.getElementById('dice-open-details-btn').onclick = () => {
     mobileDiceModal.style.display = 'none';
