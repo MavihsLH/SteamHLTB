@@ -547,21 +547,30 @@ function cleanGameTitleForSearch(title) {
   if (!title) return '';
   let cleaned = title.toLowerCase().trim();
   
-  // 1. Replace trademark, registered, copyright and other symbols with space
-  cleaned = cleaned.replace(/[™®©]/g, ' ');
+  // 1. If it contains both English/ASCII and non-ASCII, strip non-ASCII
+  const hasAscii = /[a-z0-9]/.test(cleaned);
+  const hasNonAscii = /[^\x00-\x7F]/.test(cleaned);
+  if (hasAscii && hasNonAscii) {
+    cleaned = cleaned.replace(/[^\x00-\x7F]/g, ' ');
+  }
   
-  // 2. Remove anything in parenthesis (e.g. (Beta), (Demo), (soundtrack))
+  // 2. Replace trademark, registered, copyright, and punctuation symbols with space
+  cleaned = cleaned.replace(/[™®©\-–—/\\_.,]/g, ' ');
+  
+  // 3. Remove anything in parenthesis (e.g. (Beta), (Demo), (soundtrack))
   cleaned = cleaned.replace(/\([^)]*\)/g, '');
   
-  // 3. If there is a colon or dash, split and take the first part
+  // 4. If there is a colon, split and take the first part
   // e.g. "Ace Combat 7: Skies Unknown" -> "Ace Combat 7"
   if (cleaned.includes(':')) {
     cleaned = cleaned.split(':')[0];
-  } else if (cleaned.includes(' - ')) {
-    cleaned = cleaned.split(' - ')[0];
   }
   
-  // 4. Collapse multiple spaces
+  // 5. Insert space between adjacent letters and numbers (e.g. combat7 -> combat 7, season2 -> season 2)
+  cleaned = cleaned.replace(/([a-z])([0-9])/g, '$1 $2');
+  cleaned = cleaned.replace(/([0-9])([a-z])/g, '$1 $2');
+  
+  // 6. Collapse multiple spaces
   cleaned = cleaned.replace(/\s+/g, ' ');
   
   return cleaned.trim();
