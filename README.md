@@ -38,12 +38,25 @@ While HowLongToBeat is fantastic, I needed a streamlined interface dedicated spe
 
 ## (ง •̀_•́)ง Installation
 
-### Prerequisites
-You will need your Steam API key and your 17-digit SteamID64.
+### Option A: Standalone Windows Electron App (Recommended) ( ﾟヮﾟ)
+
+You can download and run SteamHLTB instantly as a native standalone desktop application:
+
+1. **Download the Release**: 
+   Go to the **Releases** section of this repository and download `SteamHLTB-win32-x64.zip`.
+2. **Extract & Launch**: 
+   Extract the ZIP archive and run **`SteamHLTB.exe`**.
+3. **Easy Visual Configuration**: 
+   No manual config files needed! Simply click the **Gear Icon** in the top-right corner on first run to enter your Steam API Key, Steam ID, and any family member IDs directly in the visual settings modal.
+
+---
+
+### Prerequisites (For Options B & C)
+You will need your Steam API key and your 17-digit SteamID64:
 1. Get your API Key here: [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
 2. Get your SteamID64 using a tool like [SteamID.io](https://steamid.io/)
 
-### Configuration
+### Configuration (For Options B & C)
 1. Clone this repository.
 2. In the root directory, create a file named `config.json`.
 3. Add your credentials to `config.json` like this:
@@ -57,7 +70,7 @@ You will need your Steam API key and your 17-digit SteamID64.
 
 ---
 
-### Option A: Running with Docker (Recommended) ( 0_0 )
+### Option B: Running with Docker ( 0_0 )
 
 1. Make sure you have Docker and Docker Compose installed.
 2. Ensure you have created your `config.json` as shown above. 
@@ -72,7 +85,7 @@ You will need your Steam API key and your 17-digit SteamID64.
    ```
 5. Access the dashboard at **http://localhost:3000** (ง •̀_•́)ง
 
-### Option B: Running with Node.js (⌐■_■)
+### Option C: Running with Node.js (⌐■_■)
 
 1. Make sure you have [Node.js](https://nodejs.org/) installed (v16 or higher recommended).
 2. Install dependencies:
@@ -85,17 +98,6 @@ You will need your Steam API key and your 17-digit SteamID64.
    npm start
    ```
 5. Access the dashboard at **http://localhost:3000** (ง •̀_•́)ง
-
-### Option C: Standalone Windows Electron App ( ﾟヮﾟ)
-
-You can download and run SteamHLTB as a native standalone desktop application:
-
-1. **Download the Release**: 
-   Go to the **Releases** section of this repository and download `SteamHLTB-win32-x64.zip`.
-2. **Extract & Launch**: 
-   Extract the ZIP archive and run **`SteamHLTB.exe`**.
-3. **Easy Visual Configuration**: 
-   You no longer need to create or edit `config.json` manually! Simply click the **Gear Icon** in the top-right corner on first run to enter your Steam API Key, Steam ID, and any family member IDs directly in the visual settings modal.
 
 ---
 
