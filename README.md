@@ -86,21 +86,27 @@ You will need your Steam API key and your 17-digit SteamID64.
    ```
 5. Access the dashboard at **http://localhost:3000** (ง •̀_•́)ง
 
-### Option C: Standalone Windows Executable ( ﾟヮﾟ)
+### Option C: Standalone Windows Electron App ( ﾟヮﾟ)
 
-If you are on Windows, you can compile the application into a standalone `.exe` (or download it from the Releases section of your GitHub repository):
+You can download and run SteamHLTB as a native standalone desktop application:
 
-1. **Build the Executable**:
-   ```bash
-   npm run build:exe
-   ```
-   This will create `steam-hltb-app.exe` in the root folder.
-2. **Setup Credentials**: Make sure you have created your `config.json` in the same directory as the executable.
-3. **Run the App**: Double-click `steam-hltb-app.exe`. It will launch the background server and automatically open the application in your default browser.
-4. **Desktop Shortcut**: To create a handy shortcut on your Desktop, run the PowerShell script:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\create-shortcut.ps1
-   ```
+1. **Download the Release**: 
+   Go to the **Releases** section of this repository and download `SteamHLTB-win32-x64.zip`.
+2. **Extract & Launch**: 
+   Extract the ZIP archive and run **`SteamHLTB.exe`**.
+3. **Easy Visual Configuration**: 
+   You no longer need to create or edit `config.json` manually! Simply click the **Gear Icon** in the top-right corner on first run to enter your Steam API Key, Steam ID, and any family member IDs directly in the visual settings modal.
+
+*For development and packaging:*
+- **Run Electron Locally (Dev)**:
+  ```bash
+  npm run start:electron
+  ```
+- **Compile and Package Electron App**:
+  ```bash
+  npm run build:electron
+  ```
+  This creates the packaged standalone folder inside `dist/SteamHLTB-win32-x64/` and copies over your current configurations automatically.
 
 ---
 
