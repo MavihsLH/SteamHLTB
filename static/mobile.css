@@ -159,20 +159,22 @@ body {
 .mobile-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1.2rem 1.2rem 80px 1.2rem;
+  overflow-x: hidden;
+  padding: 1rem 1rem 90px 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  scroll-behavior: smooth;
+  gap: 1.2rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Stats Section */
 .stats-carousel {
   display: flex;
-  gap: 0.8rem;
+  gap: 0.6rem;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
-  padding-bottom: 0.4rem;
+  padding-bottom: 0.3rem;
+  flex-shrink: 0;
 }
 
 .stats-carousel::-webkit-scrollbar {
@@ -180,22 +182,22 @@ body {
 }
 
 .stat-card {
-  flex: 0 0 calc(50% - 0.4rem);
+  flex: 0 0 calc(50% - 0.3rem);
   scroll-snap-align: start;
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 0.9rem;
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.2rem;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  min-height: 0;
 }
 
 .stat-card.card-next-up {
-  flex: 0 0 100%;
+  flex: 0 0 65%;
 }
 
 .stat-card::after {
@@ -418,8 +420,8 @@ body {
 }
 
 .progress-card.focus-game {
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 15px rgba(0, 191, 255, 0.2);
+  border-color: var(--accent-orange);
+  box-shadow: 0 4px 15px rgba(196, 131, 106, 0.15);
 }
 
 .progress-card-banner {
@@ -509,7 +511,7 @@ body {
 }
 
 .progress-ring-mini .fill {
-  stroke: var(--accent-cyan);
+  stroke: var(--accent-orange);
   stroke-linecap: round;
   transition: stroke-dashoffset 0.35s;
 }
@@ -526,21 +528,26 @@ body {
 .mobile-grid-small {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .small-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 0.6rem;
+  border-radius: 10px;
+  padding: 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
   position: relative;
   overflow: hidden;
-  min-height: 155px;
+  min-height: 140px;
   justify-content: space-between;
+}
+
+.small-card.beaten {
+  opacity: 0.55;
+  border-color: var(--accent-green);
 }
 
 .small-card-cover {
@@ -1158,4 +1165,29 @@ body {
 @keyframes slide-up {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
+}
+
+/* Mark as Beaten Button */
+.details-mark-btn {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid var(--accent-green);
+  background: rgba(163, 184, 153, 0.1);
+  color: var(--accent-green);
+  letter-spacing: 0.3px;
+  transition: background 0.2s;
+}
+
+.details-mark-btn:active {
+  background: rgba(163, 184, 153, 0.2);
+}
+
+/* Arrow indicator color fix */
+.mobile-section-title .arrow-indicator {
+  color: var(--accent-orange);
 }

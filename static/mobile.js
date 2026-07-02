@@ -8,6 +8,7 @@ let activeSyncWorkers = 0;
 const MAX_CONCURRENT_SYNC = 4;
 let visibleCardCount = 40;
 const BATCH_SIZE = 40;
+let manuallyCompleted = new Set(); // appids the user has manually marked as beaten
 
 const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
@@ -45,7 +46,10 @@ const settingsApiKey = document.getElementById('mobile-settings-api-key');
 const settingsSteamId = document.getElementById('mobile-settings-steam-id');
 const settingsFamilyIds = document.getElementById('mobile-settings-family-ids');
 
-// Native Preference Storage Helpers for Mobile
+// ============================================================================
+// PREFERENCES STORAGE HELPERS
+// ============================================================================
+
 async function getMobileConfig() {
   if (!isMobileApp) return null;
   const { Preferences } = window.Capacitor.Plugins;
@@ -61,10 +65,7 @@ async function getMobileConfig() {
 async function saveMobileConfig(config) {
   if (!isMobileApp) return;
   const { Preferences } = window.Capacitor.Plugins;
-  await Preferences.set({
-    key: 'config',
-    value: JSON.stringify(config)
-  });
+  await Preferences.set({ key: 'config', value: JSON.stringify(config) });
 }
 
 async function getMobileLibrary() {
@@ -82,13 +83,44 @@ async function getMobileLibrary() {
 async function saveMobileLibrary(libraryData) {
   if (!isMobileApp) return;
   const { Preferences } = window.Capacitor.Plugins;
-  await Preferences.set({
-    key: 'library',
-    value: JSON.stringify(libraryData)
-  });
+  await Preferences.set({ key: 'library', value: JSON.stringify(libraryData) });
 }
 
-// Clean title
+async function loadManuallyCompleted() {
+  if (!isMobileApp) return;
+  const { Preferences } = window.Capacitor.Plugins;
+  try {
+    const { value } = await Preferences.get({ key: 'manuallyCompleted' });
+    if (value) {
+      manuallyCompleted = new Set(JSON.parse(value));
+    }
+  } catch (err) {
+    console.error('Error reading manuallyCompleted:', err);
+  }
+}
+
+async function saveManuallyCompleted() {
+  if (!isMobileApp) return;
+  const { Preferences } = window.Capacitor.Plugins;
+  await Preferences.set({ key: 'manuallyCompleted', value: JSON.stringify([...manuallyCompleted]) });
+}
+
+// ============================================================================
+// GAME BEAT STATUS HELPER
+// ============================================================================
+
+function isGameBeaten(game) {
+  if (manuallyCompleted.has(game.appid)) return true;
+  if (!game.hltb || game.hltb.notFound) return false;
+  const playHours = (game.playtime_forever || 0) / 60;
+  const beatHours = game.hltb.gameplayMain || 0;
+  return beatHours > 0 && playHours >= beatHours;
+}
+
+// ============================================================================
+// TITLE CLEANING
+// ============================================================================
+
 function cleanGameTitleForSearch(title) {
   if (!title) return '';
   let cleaned = title.toLowerCase().trim();
@@ -108,7 +140,10 @@ function cleanGameTitleForSearch(title) {
   return cleaned.trim();
 }
 
-// Scrape HLTB times
+// ============================================================================
+// HLTB MOBILE SCRAPER
+// ============================================================================
+
 async function scrapeHltbMobile(gameName) {
   if (!isMobileApp) return null;
   const { CapacitorHttp } = window.Capacitor.Plugins;
@@ -116,59 +151,31 @@ async function scrapeHltbMobile(gameName) {
   const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
   
   try {
-    const initUrl = `https://howlongtobeat.com/api/bleed/init?t=${now}`;
     const initRes = await CapacitorHttp.get({
-      url: initUrl,
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Referer': 'https://howlongtobeat.com/',
-        'Origin': 'https://howlongtobeat.com'
-      }
+      url: `https://howlongtobeat.com/api/bleed/init?t=${now}`,
+      headers: { 'User-Agent': USER_AGENT, 'Referer': 'https://howlongtobeat.com/', 'Origin': 'https://howlongtobeat.com' }
     });
     if (initRes.status !== 200 || !initRes.data) return null;
     
     const auth = initRes.data;
-    const searchTerms = gameName.trim().split(' ');
     const payload = {
       searchType: "games",
-      searchTerms: searchTerms,
+      searchTerms: gameName.trim().split(' '),
       searchPage: 1,
       size: 20,
       searchOptions: {
-        games: {
-          userId: 0,
-          platform: "",
-          sortCategory: "popular",
-          rangeCategory: "main",
-          rangeTime: { min: 0, max: 0 },
-          gameplay: { perspective: "", flow: "", genre: "", difficulty: "" },
-          rangeYear: { min: "", max: "" },
-          modifier: ""
-        },
+        games: { userId: 0, platform: "", sortCategory: "popular", rangeCategory: "main", rangeTime: { min: 0, max: 0 }, gameplay: { perspective: "", flow: "", genre: "", difficulty: "" }, rangeYear: { min: "", max: "" }, modifier: "" },
         users: { sortCategory: "postcount" },
         lists: { sortCategory: "follows" },
-        filter: "",
-        sort: 0,
-        randomizer: 0
+        filter: "", sort: 0, randomizer: 0
       },
       useCache: true
     };
-    
-    if (auth.hpKey) {
-      payload[auth.hpKey] = auth.hpVal;
-    }
+    if (auth.hpKey) payload[auth.hpKey] = auth.hpVal;
     
     const queryRes = await CapacitorHttp.post({
       url: "https://howlongtobeat.com/api/bleed",
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Content-Type': 'application/json',
-        'Origin': 'https://howlongtobeat.com',
-        'Referer': 'https://howlongtobeat.com/',
-        'x-auth-token': auth.token,
-        'x-hp-key': auth.hpKey,
-        'x-hp-val': auth.hpVal
-      },
+      headers: { 'User-Agent': USER_AGENT, 'Content-Type': 'application/json', 'Origin': 'https://howlongtobeat.com', 'Referer': 'https://howlongtobeat.com/', 'x-auth-token': auth.token, 'x-hp-key': auth.hpKey, 'x-hp-val': auth.hpVal },
       data: payload
     });
     
@@ -180,10 +187,13 @@ async function scrapeHltbMobile(gameName) {
   }
 }
 
-// Mobile sync fetch
+// ============================================================================
+// STEAM LIBRARY SYNC
+// ============================================================================
+
 async function performMobileSync(force) {
   if (!isMobileApp) return null;
-  const { Preferences, CapacitorHttp } = window.Capacitor.Plugins;
+  const { CapacitorHttp } = window.Capacitor.Plugins;
   
   const config = await getMobileConfig();
   if (!config || !config.STEAM_API_KEY || !config.STEAM_ID) {
@@ -195,9 +205,8 @@ async function performMobileSync(force) {
   const familyIds = config.FAMILY_STEAM_IDS || [];
   
   if (isNaN(primaryId)) {
-    const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${primaryId}`;
-    const resolveRes = await CapacitorHttp.get({ url: resolveUrl });
-    if (resolveRes.status === 200 && resolveRes.data && resolveRes.data.response && resolveRes.data.response.steamid) {
+    const resolveRes = await CapacitorHttp.get({ url: `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${primaryId}` });
+    if (resolveRes.status === 200 && resolveRes.data?.response?.steamid) {
       primaryId = resolveRes.data.response.steamid;
     } else {
       throw new Error('Failed to resolve Steam Vanity URL.');
@@ -207,49 +216,29 @@ async function performMobileSync(force) {
   const fetchGames = async (steamId) => {
     const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamId}&include_appinfo=true&include_played_free_games=true&format=json`;
     const response = await CapacitorHttp.get({ url });
-    if (response.status !== 200) {
-      throw new Error(`Failed to fetch games for SteamID ${steamId}`);
-    }
+    if (response.status !== 200) throw new Error(`Failed to fetch games for SteamID ${steamId}`);
     return response.data?.response?.games || [];
   };
   
   const primaryGames = await fetchGames(primaryId);
   const gamesMap = new Map();
   for (const game of primaryGames) {
-    gamesMap.set(game.appid, {
-      appid: game.appid,
-      name: game.name,
-      playtime_forever: game.playtime_forever || 0,
-      img_icon_url: game.img_icon_url || '',
-      owner_steamid: primaryId,
-      is_owned: true,
-      source: 'primary'
-    });
+    gamesMap.set(game.appid, { appid: game.appid, name: game.name, playtime_forever: game.playtime_forever || 0, img_icon_url: game.img_icon_url || '', owner_steamid: primaryId, is_owned: true, source: 'primary' });
   }
   
   for (const memberId of familyIds) {
     let resolvedMemberId = memberId;
     if (isNaN(memberId)) {
-      const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${memberId}`;
-      const resolveRes = await CapacitorHttp.get({ url: resolveUrl });
+      const resolveRes = await CapacitorHttp.get({ url: `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${memberId}` });
       if (resolveRes.status === 200 && resolveRes.data?.response?.steamid) {
         resolvedMemberId = resolveRes.data.response.steamid;
       }
     }
-    
     try {
       const memberGames = await fetchGames(resolvedMemberId);
       for (const game of memberGames) {
         if (!gamesMap.has(game.appid)) {
-          gamesMap.set(game.appid, {
-            appid: game.appid,
-            name: game.name,
-            playtime_forever: 0,
-            img_icon_url: game.img_icon_url || '',
-            owner_steamid: resolvedMemberId,
-            is_owned: false,
-            source: 'family_manual'
-          });
+          gamesMap.set(game.appid, { appid: game.appid, name: game.name, playtime_forever: 0, img_icon_url: game.img_icon_url || '', owner_steamid: resolvedMemberId, is_owned: false, source: 'family_manual' });
         }
       }
     } catch (err) {
@@ -261,33 +250,24 @@ async function performMobileSync(force) {
   let existingHltbMap = new Map();
   if (!force) {
     const currentLibrary = await getMobileLibrary();
-    (currentLibrary.games || []).forEach(g => {
-      if (g.hltb) existingHltbMap.set(g.appid, g.hltb);
-    });
+    (currentLibrary.games || []).forEach(g => { if (g.hltb) existingHltbMap.set(g.appid, g.hltb); });
   }
   
-  const mergedGames = allGames.map(game => ({
-    ...game,
-    hltb: existingHltbMap.get(game.appid) || null
-  }));
-  
-  const libraryData = {
-    games: mergedGames,
-    lastSync: Date.now()
-  };
-  
+  const mergedGames = allGames.map(game => ({ ...game, hltb: existingHltbMap.get(game.appid) || null }));
+  const libraryData = { games: mergedGames, lastSync: Date.now() };
   await saveMobileLibrary(libraryData);
   return libraryData;
 }
 
-// Fetch single HLTB item
+// ============================================================================
+// HLTB DATA FETCHER
+// ============================================================================
+
 async function fetchHltbData(game) {
   const cleanedTitle = cleanGameTitleForSearch(game.name);
   if (!cleanedTitle) return { title: game.name, notFound: true };
   
-  console.log(`Searching HowLongToBeat (mobile) for: "${game.name}" (Cleaned: "${cleanedTitle}")...`);
   let results = await scrapeHltbMobile(game.name);
-  
   if (!results || results.length === 0) {
     if (cleanedTitle !== game.name.toLowerCase().trim()) {
       results = await scrapeHltbMobile(cleanedTitle);
@@ -298,7 +278,6 @@ async function fetchHltbData(game) {
     const cacheKey = game.name.trim().toLowerCase();
     const exactMatch = results.find(r => r.game_name?.toLowerCase() === cacheKey);
     const match = exactMatch || results[0];
-    
     return {
       hltbId: String(match.game_id),
       title: match.game_name,
@@ -308,21 +287,20 @@ async function fetchHltbData(game) {
       imageUrl: match.game_image ? `https://howlongtobeat.com/games/${match.game_image}` : '',
       notFound: false
     };
-  } else {
-    return {
-      title: game.name,
-      notFound: true
-    };
   }
+  return { title: game.name, notFound: true };
 }
 
-// Load App
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
 document.addEventListener('DOMContentLoaded', async () => {
+  await loadManuallyCompleted();
   await fetchLibrary();
   setupEventListeners();
 });
 
-// Fetch Library and state check
 async function fetchLibrary() {
   try {
     mobileSetupView.style.display = 'none';
@@ -349,25 +327,17 @@ async function fetchLibrary() {
       return;
     }
     
-    // Loaded games state
-    games = data.games.map(g => ({
-      ...g,
-      hltb: g.hltb || null,
-      hltbLoading: false,
-      hltbError: false
-    }));
-    
+    games = data.games.map(g => ({ ...g, hltb: g.hltb || null, hltbLoading: false, hltbError: false }));
     mobileLastSyncTime.textContent = formatLastSyncTime(data.lastSync);
     
     updateStats();
     handleSearchAndFilter();
   } catch (err) {
     console.error('Failed to load library:', err);
-    mobileStatusIndicator.className = 'status-dot led-red';
+    mobileStatusIndicator.className = 'status-dot led-orange';
   }
 }
 
-// Formats timestamp
 function formatLastSyncTime(timestamp) {
   if (!timestamp) return 'Never';
   const diff = Date.now() - timestamp;
@@ -379,40 +349,25 @@ function formatLastSyncTime(timestamp) {
   return new Date(timestamp).toLocaleDateString();
 }
 
-// Update stats
+// ============================================================================
+// STATS
+// ============================================================================
+
 function updateStats() {
-  const backlogGames = games.filter(g => {
-    if (!g.hltb || g.hltb.notFound) return true; // default backlog
-    const playtimeHrs = (g.playtime_forever || 0) / 60;
-    const beatTimeHrs = g.hltb.gameplayMain || 0;
-    return beatTimeHrs === 0 || playtimeHrs < beatTimeHrs;
-  });
+  const completedGames = games.filter(g => isGameBeaten(g));
+  const backlogGames = games.filter(g => !isGameBeaten(g));
   
   statBacklogCount.innerHTML = `${backlogGames.length} <span class="stat-card-sub">Games</span>`;
-  
   const totalMins = backlogGames.reduce((sum, g) => sum + (g.playtime_forever || 0), 0);
   statBacklogHours.textContent = `${Math.round(totalMins / 60)}h Total`;
   
-  const completedGames = games.filter(g => {
-    if (!g.hltb || g.hltb.notFound) return false;
-    const playtimeHrs = (g.playtime_forever || 0) / 60;
-    const beatTimeHrs = g.hltb.gameplayMain || 0;
-    return beatTimeHrs > 0 && playtimeHrs >= beatTimeHrs;
-  });
-  
   statCompletedCount.innerHTML = `${completedGames.length} <span class="stat-card-sub">Games</span>`;
-  
-  const completedHrs = completedGames.reduce((sum, g) => {
-    const main = g.hltb?.gameplayMain || 0;
-    return sum + main;
-  }, 0);
+  const completedHrs = completedGames.reduce((sum, g) => sum + (g.hltb?.gameplayMain || 0), 0);
   statCompletedHours.textContent = `${completedHrs}h Beaten`;
   
-  // Next Up Backlog recommendation
   const eligible = backlogGames.filter(g => g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0);
   if (eligible.length > 0) {
-    // Sort by short playtime
-    eligible.sort((a, b) => (a.hltb.gameplayMain) - (b.hltb.gameplayMain));
+    eligible.sort((a, b) => a.hltb.gameplayMain - b.hltb.gameplayMain);
     statNextUpName.textContent = eligible[0].name;
     statNextUpTime.textContent = `${eligible[0].hltb.gameplayMain}h main story`;
   } else {
@@ -421,50 +376,40 @@ function updateStats() {
   }
 }
 
-// Filter and Sort logic
+// ============================================================================
+// FILTER & SORT
+// ============================================================================
+
 function handleSearchAndFilter() {
   const query = mobileSearchInput.value.toLowerCase().trim();
   
   filteredGames = games.filter(game => {
-    // 1. Text Search
     if (query && !game.name.toLowerCase().includes(query)) return false;
     
-    // 2. Chip Filters
     const playHours = (game.playtime_forever || 0) / 60;
-    const beatHours = game.hltb && !game.hltb.notFound ? game.hltb.gameplayMain : 0;
+    const beaten = isGameBeaten(game);
     
     switch (currentFilter) {
-      case 'owned':
-        return game.is_owned;
-      case 'shared':
-        return !game.is_owned;
-      case 'played':
-        return playHours > 0.1;
-      case 'unplayed':
-        return playHours <= 0.1;
-      case 'completed':
-        return beatHours > 0 && playHours >= beatHours;
-      default:
-        return true;
+      case 'owned': return game.is_owned;
+      case 'shared': return !game.is_owned;
+      case 'played': return playHours > 0.1;
+      case 'unplayed': return playHours <= 0.1;
+      case 'completed': return beaten;
+      default: return true;
     }
   });
   
-  // Sort
   sortGames();
-  
-  // Render
+  visibleCardCount = BATCH_SIZE;
   renderMobileGrids();
 }
 
 function sortGames() {
   filteredGames.sort((a, b) => {
     switch (currentSort) {
-      case 'playtime_asc':
-        return (a.playtime_forever || 0) - (b.playtime_forever || 0);
-      case 'name_asc':
-        return a.name.localeCompare(b.name);
-      case 'name_desc':
-        return b.name.localeCompare(a.name);
+      case 'playtime_asc': return (a.playtime_forever || 0) - (b.playtime_forever || 0);
+      case 'name_asc': return a.name.localeCompare(b.name);
+      case 'name_desc': return b.name.localeCompare(a.name);
       case 'hltb_main_asc': {
         const tA = a.hltb && !a.hltb.notFound ? a.hltb.gameplayMain : Infinity;
         const tB = b.hltb && !b.hltb.notFound ? b.hltb.gameplayMain : Infinity;
@@ -476,39 +421,41 @@ function sortGames() {
         return tB - tA;
       }
       case 'playtime_desc':
-      default:
-        return (b.playtime_forever || 0) - (a.playtime_forever || 0);
+      default: return (b.playtime_forever || 0) - (a.playtime_forever || 0);
     }
   });
 }
 
-// Render cards
+// ============================================================================
+// RENDERING
+// ============================================================================
+
 function renderMobileGrids() {
   mobileNoMatchesView.style.display = 'none';
+  mobileGamesGrid.style.display = 'grid';
   
-  // 1. Separate "Games in Progress" (played, but main story not beaten yet)
-  const inProgress = filteredGames.filter(g => {
+  // "Games in Progress" — only on "all" filter with no search query
+  const showProgress = currentFilter === 'all' && !mobileSearchInput.value;
+  const inProgress = showProgress ? filteredGames.filter(g => {
     const playHours = (g.playtime_forever || 0) / 60;
     const beatHours = g.hltb && !g.hltb.notFound ? g.hltb.gameplayMain : 0;
-    return playHours > 0.1 && beatHours > 0 && playHours < beatHours;
-  });
+    return playHours > 0.1 && beatHours > 0 && !isGameBeaten(g);
+  }) : [];
   
-  if (inProgress.length > 0 && currentFilter === 'all' && !mobileSearchInput.value) {
+  if (inProgress.length > 0) {
     progressGamesSection.style.display = 'block';
-    progressGamesGrid.innerHTML = inProgress.slice(0, 3).map((game, idx) => {
+    const shown = inProgress.slice(0, 5);
+    progressGamesGrid.innerHTML = shown.map(game => {
       const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
       const mainHrs = game.hltb.gameplayMain;
-      const pct = Math.min(100, Math.round((playHours / mainHrs) * 100));
-      const isFocus = idx === 0;
-      
+      const pct = Math.min(100, Math.round((parseFloat(playHours) / mainHrs) * 100));
       const radius = 18;
-      const circ = 2 * Math.PI * radius; // 113.1
+      const circ = 2 * Math.PI * radius;
       const offset = circ - (pct / 100) * circ;
-      
       const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
       
       return `
-        <div class="progress-card ${isFocus ? 'focus-game' : ''}" onclick="openGameDetailsSheet(${game.appid})">
+        <div class="progress-card" onclick="openGameDetailsSheet(${game.appid})">
           <div class="progress-card-banner">
             <img src="${imgUrl}" alt="${escapeHtml(game.name)}" loading="lazy">
             <div class="progress-card-banner-overlay"></div>
@@ -516,10 +463,10 @@ function renderMobileGrids() {
           <div class="progress-card-details">
             <div class="progress-card-top">
               <h4 class="progress-game-title">${escapeHtml(game.name)}</h4>
-              <span class="progress-game-hours"><i class="fa-solid fa-clock"></i> ${playHours} hrs played</span>
+              <span class="progress-game-hours"><i class="fa-solid fa-clock"></i> ${playHours} hrs</span>
             </div>
             <div class="progress-card-bottom">
-              <span class="progress-hltb-label">HLTB Story: ${mainHrs}h</span>
+              <span class="progress-hltb-label">HLTB: ${mainHrs}h</span>
               <div class="progress-ring-mini">
                 <svg width="44" height="44">
                   <circle class="track" cx="22" cy="22" r="18"></circle>
@@ -536,16 +483,21 @@ function renderMobileGrids() {
     progressGamesSection.style.display = 'none';
   }
   
-  // 2. Render remaining grid
-  // Filter out the inProgress items rendered in the progress section to avoid duplicate lists
+  // Build the general backlog grid (all filtered games minus the progress ones shown above)
   let gridGames = filteredGames;
-  if (inProgress.length > 0 && currentFilter === 'all' && !mobileSearchInput.value) {
-    const progressIds = new Set(inProgress.slice(0, 3).map(g => g.appid));
+  if (inProgress.length > 0) {
+    const progressIds = new Set(inProgress.slice(0, 5).map(g => g.appid));
     gridGames = filteredGames.filter(g => !progressIds.has(g.appid));
   }
   
-  if (filteredGames.length === 0) {
+  if (gridGames.length === 0 && inProgress.length === 0) {
     mobileNoMatchesView.style.display = 'flex';
+    mobileGamesGrid.innerHTML = '';
+    allGamesHeader.style.display = 'none';
+    return;
+  }
+  
+  if (gridGames.length === 0) {
     mobileGamesGrid.innerHTML = '';
     allGamesHeader.style.display = 'none';
     return;
@@ -554,36 +506,37 @@ function renderMobileGrids() {
   allGamesHeader.style.display = 'block';
   allGamesHeader.textContent = currentFilter === 'all' ? 'YOUR BACKLOG' : `FILTERED: ${currentFilter.toUpperCase()}`;
   
-  // Load limited visible batch initially
   const batch = gridGames.slice(0, visibleCardCount);
-  mobileGamesGrid.innerHTML = batch.map(game => {
-    const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
-    const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
-    
-    // Check progress
-    let ringHtml = '';
-    if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
-      const mainHrs = game.hltb.gameplayMain;
-      const pct = Math.min(100, Math.round((playHours / mainHrs) * 100));
-      ringHtml = `<span style="font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent-orange-light); font-weight: 700;">${pct}%</span>`;
-    }
-    
-    return `
-      <div class="small-card" onclick="openGameDetailsSheet(${game.appid})">
-        <div class="small-card-cover">
-          <img src="${imgUrl}" alt="${escapeHtml(game.name)}" onerror="handleCoverError(this, '${escapeHtml(game.name)}')" loading="lazy">
-        </div>
-        <h4 class="small-card-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</h4>
-        <div class="small-card-meta">
-          <span class="small-card-hours">${playHours}h</span>
-          ${ringHtml}
-        </div>
-      </div>
-    `;
-  }).join('');
+  mobileGamesGrid.innerHTML = batch.map(game => createSmallCardHtml(game)).join('');
 }
 
-// Error handle for cards
+function createSmallCardHtml(game) {
+  const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
+  const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
+  const beaten = isGameBeaten(game);
+  
+  let badgeHtml = '';
+  if (beaten) {
+    badgeHtml = `<span style="font-size: 0.6rem; color: var(--accent-green);">✓</span>`;
+  } else if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
+    const pct = Math.min(100, Math.round((parseFloat(playHours) / game.hltb.gameplayMain) * 100));
+    badgeHtml = `<span style="font-family: var(--font-mono); font-size: 0.6rem; color: var(--accent-orange-light); font-weight: 700;">${pct}%</span>`;
+  }
+  
+  return `
+    <div class="small-card${beaten ? ' beaten' : ''}" onclick="openGameDetailsSheet(${game.appid})">
+      <div class="small-card-cover">
+        <img src="${imgUrl}" alt="${escapeHtml(game.name)}" onerror="handleCoverError(this, '${escapeHtml(game.name)}')" loading="lazy">
+      </div>
+      <h4 class="small-card-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</h4>
+      <div class="small-card-meta">
+        <span class="small-card-hours">${playHours}h</span>
+        ${badgeHtml}
+      </div>
+    </div>
+  `;
+}
+
 function handleCoverError(img, name) {
   const container = img.parentElement;
   const placeholder = document.createElement('div');
@@ -593,7 +546,10 @@ function handleCoverError(img, name) {
   container.appendChild(placeholder);
 }
 
-// Scroll incremental batch loader
+// ============================================================================
+// INFINITE SCROLL
+// ============================================================================
+
 const contentArea = document.querySelector('.mobile-content');
 if (contentArea) {
   contentArea.addEventListener('scroll', () => {
@@ -606,146 +562,114 @@ if (contentArea) {
   });
 }
 
-// Event Listeners registration
+// ============================================================================
+// EVENT LISTENERS
+// ============================================================================
+
 function setupEventListeners() {
-  // Search
-  mobileSearchInput.addEventListener('input', () => {
-    visibleCardCount = BATCH_SIZE;
-    handleSearchAndFilter();
-  });
+  mobileSearchInput.addEventListener('input', debounce(handleSearchAndFilter, 250));
   
-  // Sort
   mobileSortSelect.addEventListener('change', (e) => {
     currentSort = e.target.value;
-    visibleCardCount = BATCH_SIZE;
     handleSearchAndFilter();
   });
   
-  // Filter chips click
   filterChips.forEach(chip => {
     chip.addEventListener('click', () => {
       filterChips.forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       currentFilter = chip.getAttribute('data-filter');
-      visibleCardCount = BATCH_SIZE;
       handleSearchAndFilter();
     });
   });
   
-  // Settings bottom sheet triggers
+  // Settings
   document.getElementById('mobile-settings-btn').addEventListener('click', openSettingsSheet);
-  document.getElementById('mobile-setup-trigger-btn').addEventListener('click', openSettingsSheet);
-  document.getElementById('close-sheet-btn').addEventListener('click', () => {
-    mobileSettingsOverlay.style.display = 'none';
-  });
-  
-  // Settings save submit
+  document.getElementById('mobile-setup-trigger-btn')?.addEventListener('click', openSettingsSheet);
+  document.getElementById('close-sheet-btn').addEventListener('click', () => { mobileSettingsOverlay.style.display = 'none'; });
   mobileSettingsForm.addEventListener('submit', saveSettingsMobile);
   
-  // Sync Choices overlay modal triggers
-  document.getElementById('mobile-sync-btn').addEventListener('click', () => {
-    mobileSyncModal.style.display = 'flex';
-  });
-  document.getElementById('mobile-empty-sync-btn').addEventListener('click', () => {
-    mobileSyncModal.style.display = 'flex';
-  });
-  document.getElementById('close-sync-sheet-btn').addEventListener('click', () => {
-    mobileSyncModal.style.display = 'none';
-  });
+  // Sync modal
+  document.getElementById('mobile-sync-btn').addEventListener('click', () => { mobileSyncModal.style.display = 'flex'; });
+  document.getElementById('mobile-empty-sync-btn')?.addEventListener('click', () => { mobileSyncModal.style.display = 'flex'; });
+  document.getElementById('close-sync-sheet-btn').addEventListener('click', () => { mobileSyncModal.style.display = 'none'; });
+  document.getElementById('mobile-sync-quick-btn').addEventListener('click', () => { mobileSyncModal.style.display = 'none'; startLibrarySyncMobile(false); });
+  document.getElementById('mobile-sync-force-btn').addEventListener('click', () => { mobileSyncModal.style.display = 'none'; startLibrarySyncMobile(true); });
   
-  // Choices bindings
-  document.getElementById('mobile-sync-quick-btn').addEventListener('click', () => {
-    mobileSyncModal.style.display = 'none';
-    startLibrarySyncMobile(false);
-  });
-  document.getElementById('mobile-sync-force-btn').addEventListener('click', () => {
-    mobileSyncModal.style.display = 'none';
-    startLibrarySyncMobile(true);
-  });
+  // Details
+  document.getElementById('close-details-btn').addEventListener('click', () => { mobileDetailsOverlay.style.display = 'none'; });
   
-  // Details overlays close triggers
-  document.getElementById('close-details-btn').addEventListener('click', () => {
-    mobileDetailsOverlay.style.display = 'none';
-  });
-  
-  // Dice recommender picker trigger
+  // Dice
   document.getElementById('mobile-dice-btn').addEventListener('click', triggerDicePickerMobile);
-  document.getElementById('close-dice-sheet-btn').addEventListener('click', () => {
-    mobileDiceModal.style.display = 'none';
-  });
+  document.getElementById('close-dice-sheet-btn').addEventListener('click', () => { mobileDiceModal.style.display = 'none'; });
   document.getElementById('dice-reroll-btn').addEventListener('click', triggerDicePickerMobile);
 }
 
-// Settings bottom sheet popup
+function debounce(func, wait) {
+  let timeout;
+  return function (...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
+
+// ============================================================================
+// SETTINGS SHEET
+// ============================================================================
+
 async function openSettingsSheet() {
   mobileSettingsOverlay.style.display = 'flex';
   const config = await getMobileConfig();
   if (config) {
-    settingsApiKey.value = config.STEAM_API_KEY_MASKED || '';
-    settingsApiKey.placeholder = config.STEAM_API_KEY_SET ? '••••••••••••••••••••••••••••••••' : 'Enter Steam API Key';
+    settingsApiKey.value = '';
+    settingsApiKey.placeholder = config.STEAM_API_KEY ? '••••••••••••••••••••••••••••••••' : 'Enter Steam API Key';
     settingsSteamId.value = config.STEAM_ID || '';
     settingsFamilyIds.value = (config.FAMILY_STEAM_IDS || []).join(', ');
   }
 }
 
-// Save mobile settings
 async function saveSettingsMobile(e) {
   e.preventDefault();
   const apiKey = settingsApiKey.value.trim();
   const steamId = settingsSteamId.value.trim();
   const familyIdsStr = settingsFamilyIds.value.trim();
-  
   const familyIds = familyIdsStr ? familyIdsStr.split(',').map(id => id.trim()).filter(Boolean) : [];
   
   try {
     const current = await getMobileConfig() || {};
     const configToSave = {
       STEAM_ID: steamId,
-      FAMILY_STEAM_IDS: familyIds
+      FAMILY_STEAM_IDS: familyIds,
+      STEAM_API_KEY: (apiKey && !apiKey.includes('•')) ? apiKey : (current.STEAM_API_KEY || ''),
     };
-    
-    if (apiKey && !apiKey.includes('•')) {
-      configToSave.STEAM_API_KEY = apiKey;
-    } else {
-      configToSave.STEAM_API_KEY = current.STEAM_API_KEY || '';
-    }
-    
     configToSave.STEAM_API_KEY_SET = !!configToSave.STEAM_API_KEY;
-    configToSave.STEAM_API_KEY_MASKED = configToSave.STEAM_API_KEY ? '••••••••••••••••••••••••••••••••' : '';
     
     await saveMobileConfig(configToSave);
     mobileSettingsOverlay.style.display = 'none';
-    
     await fetchLibrary();
   } catch (err) {
     alert(`Failed to save settings: ${err.message}`);
   }
 }
 
-// Start mobile sync
+// ============================================================================
+// LIBRARY SYNC
+// ============================================================================
+
 async function startLibrarySyncMobile(force) {
   try {
     mobileEmptyView.style.display = 'none';
-    mobileGamesGrid.style.display = 'none';
-    progressGamesSection.style.display = 'none';
-    
     mobileLastSyncTime.textContent = 'Syncing...';
     
     const libraryData = await performMobileSync(force);
     
-    games = libraryData.games.map(g => ({
-      ...g,
-      hltb: g.hltb || null,
-      hltbLoading: false,
-      hltbError: false
-    }));
-    
+    games = libraryData.games.map(g => ({ ...g, hltb: g.hltb || null, hltbLoading: false, hltbError: false }));
     mobileLastSyncTime.textContent = formatLastSyncTime(libraryData.lastSync);
     
     updateStats();
     handleSearchAndFilter();
     
-    // Kickoff HLTB background sync queue
+    // Kick off HLTB background sync
     hltbSyncQueue = games.filter(g => !g.hltb);
     if (hltbSyncQueue.length > 0) {
       mobileSyncHudBadge.style.display = 'flex';
@@ -758,12 +682,9 @@ async function startLibrarySyncMobile(force) {
   }
 }
 
-// HLTB sync pipeline
 function startHltbSyncMobile() {
   const workersNeeded = Math.min(MAX_CONCURRENT_SYNC - activeSyncWorkers, hltbSyncQueue.length);
-  for (let i = 0; i < workersNeeded; i++) {
-    processNextQueueItemMobile();
-  }
+  for (let i = 0; i < workersNeeded; i++) { processNextQueueItemMobile(); }
 }
 
 async function processNextQueueItemMobile() {
@@ -781,59 +702,75 @@ async function processNextQueueItemMobile() {
   
   try {
     const hltbData = await fetchHltbData(game);
-    
     const index = games.findIndex(g => g.appid === game.appid);
     if (index !== -1) {
       games[index].hltb = hltbData;
-      
-      // Save continuously to preference storage
-      await saveMobileLibrary({
-        games: games,
-        lastSync: Date.now()
-      });
+      await saveMobileLibrary({ games: games, lastSync: Date.now() });
     }
   } catch (err) {
     console.error(`Failed to get HLTB times for ${game.name}:`, err);
   }
   
-  // Progress tracker
   const total = games.length;
   const processed = games.filter(g => g.hltb !== null).length;
-  const pct = Math.round((processed / total) * 100);
-  mobileSyncHudPct.textContent = `${pct}%`;
-  
-  updateStats();
+  mobileSyncHudPct.textContent = `${Math.round((processed / total) * 100)}%`;
   
   activeSyncWorkers--;
   processNextQueueItemMobile();
 }
 
-// Open game details modal
+// ============================================================================
+// GAME DETAILS SHEET
+// ============================================================================
+
 function openGameDetailsSheet(appid) {
   const game = games.find(g => g.appid === appid);
   if (!game) return;
   
   document.getElementById('details-game-name').textContent = game.name;
+  document.getElementById('details-game-img').src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
   
-  const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
-  document.getElementById('details-game-img').src = imgUrl;
-  
-  // Owner info
   const ownerBadge = document.getElementById('details-owner-badge');
   ownerBadge.textContent = game.is_owned ? 'Owned' : 'Borrowed';
-  ownerBadge.className = `details-owner-badge ${game.is_owned ? 'owned' : 'shared'}`;
   
-  // Playtime
   const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
   document.getElementById('details-playtime-val').textContent = `${playHours} hrs`;
   
   // Beat status
-  let beatStatus = 'Not Beaten';
-  if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
-    const isBeaten = (game.playtime_forever / 60) >= game.hltb.gameplayMain;
-    beatStatus = isBeaten ? 'Beaten 🎉' : 'In Progress ⏳';
+  const beaten = isGameBeaten(game);
+  const statusEl = document.getElementById('details-status-val');
+  statusEl.textContent = beaten ? 'Beaten ✓' : (parseFloat(playHours) > 0.1 ? 'In Progress' : 'Not Started');
+  statusEl.style.color = beaten ? 'var(--accent-green)' : 'var(--text-primary)';
+  
+  // Mark as complete button
+  const markBtn = document.getElementById('details-mark-complete-btn');
+  if (markBtn) {
+    if (beaten) {
+      if (manuallyCompleted.has(game.appid)) {
+        markBtn.textContent = 'Unmark as Beaten';
+        markBtn.style.display = 'block';
+        markBtn.onclick = async () => {
+          manuallyCompleted.delete(game.appid);
+          await saveManuallyCompleted();
+          updateStats();
+          handleSearchAndFilter();
+          openGameDetailsSheet(appid); // refresh the sheet
+        };
+      } else {
+        markBtn.style.display = 'none'; // auto-beaten, no need for button
+      }
+    } else {
+      markBtn.textContent = 'Mark as Beaten';
+      markBtn.style.display = 'block';
+      markBtn.onclick = async () => {
+        manuallyCompleted.add(game.appid);
+        await saveManuallyCompleted();
+        updateStats();
+        handleSearchAndFilter();
+        openGameDetailsSheet(appid);
+      };
+    }
   }
-  document.getElementById('details-status-val').textContent = beatStatus;
   
   // HLTB
   if (game.hltb && !game.hltb.notFound) {
@@ -846,39 +783,35 @@ function openGameDetailsSheet(appid) {
     document.getElementById('details-hltb-100').textContent = '--';
   }
   
-  // Links
   document.getElementById('details-steam-link').href = `https://store.steampowered.com/app/${game.appid}`;
-  document.getElementById('details-hltb-link').href = game.hltb && game.hltb.hltbId 
+  document.getElementById('details-hltb-link').href = game.hltb?.hltbId
     ? `https://howlongtobeat.com/game/${game.hltb.hltbId}`
     : `https://howlongtobeat.com/?q=${encodeURIComponent(cleanGameTitleForSearch(game.name))}`;
     
   mobileDetailsOverlay.style.display = 'flex';
 }
 
-// Trigger suggestion dice roll picker
+// ============================================================================
+// DICE PICKER
+// ============================================================================
+
 function triggerDicePickerMobile() {
   if (filteredGames.length === 0) {
     alert('No games match the active filters to pick from!');
     return;
   }
   
-  // Pick random game
   const idx = Math.floor(Math.random() * filteredGames.length);
   const game = filteredGames[idx];
-  
   const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
-  const mainHrs = game.hltb && !game.hltb.notFound ? `${game.hltb.gameplayMain}h` : 'No HLTB times';
+  const mainHrs = game.hltb && !game.hltb.notFound ? `${game.hltb.gameplayMain}h` : '--';
   
   document.getElementById('dice-game-title').textContent = game.name;
   document.getElementById('dice-playtime-val').textContent = `${playHours}h`;
   document.getElementById('dice-hltb-main-val').textContent = mainHrs;
+  document.getElementById('dice-game-img').src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
   
-  const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
-  document.getElementById('dice-game-img').src = imgUrl;
-  
-  // Open details click binding
-  const openDetailsBtn = document.getElementById('dice-open-details-btn');
-  openDetailsBtn.onclick = () => {
+  document.getElementById('dice-open-details-btn').onclick = () => {
     mobileDiceModal.style.display = 'none';
     openGameDetailsSheet(game.appid);
   };
@@ -886,13 +819,11 @@ function triggerDicePickerMobile() {
   mobileDiceModal.style.display = 'flex';
 }
 
-// Escapes special characters
+// ============================================================================
+// UTILS
+// ============================================================================
+
 function escapeHtml(str) {
   if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
