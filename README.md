@@ -97,17 +97,6 @@ You can download and run SteamHLTB as a native standalone desktop application:
 3. **Easy Visual Configuration**: 
    You no longer need to create or edit `config.json` manually! Simply click the **Gear Icon** in the top-right corner on first run to enter your Steam API Key, Steam ID, and any family member IDs directly in the visual settings modal.
 
-*For development and packaging:*
-- **Run Electron Locally (Dev)**:
-  ```bash
-  npm run start:electron
-  ```
-- **Compile and Package Electron App**:
-  ```bash
-  npm run build:electron
-  ```
-  This creates the packaged standalone folder inside `dist/SteamHLTB-win32-x64/` and copies over your current configurations automatically.
-
 ---
 
 ## (ง'̀-'́)ง Tech Stack
