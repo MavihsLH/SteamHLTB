@@ -527,6 +527,28 @@ app.post('/api/sync', async (req, res) => {
   }
 });
 
+// Helper to clean Steam game titles for better HLTB search matching
+function cleanGameTitleForSearch(title) {
+  if (!title) return '';
+  let cleaned = title.toLowerCase().trim();
+  
+  // 1. Remove trademark, registered, copyright and other symbols
+  cleaned = cleaned.replace(/[™®©]/g, '');
+  
+  // 2. Remove anything in parenthesis (e.g. (Beta), (Demo), (soundtrack))
+  cleaned = cleaned.replace(/\([^)]*\)/g, '');
+  
+  // 3. If there is a colon or dash, split and take the first part
+  // e.g. "Ace Combat 7: Skies Unknown" -> "Ace Combat 7"
+  if (cleaned.includes(':')) {
+    cleaned = cleaned.split(':')[0];
+  } else if (cleaned.includes(' - ')) {
+    cleaned = cleaned.split(' - ')[0];
+  }
+  
+  return cleaned.trim();
+}
+
 // API endpoint to query HLTB data for a specific game
 app.get('/api/hltb', async (req, res) => {
   const { title } = req.query;
@@ -547,7 +569,16 @@ app.get('/api/hltb', async (req, res) => {
 
   try {
     console.log(`Searching HowLongToBeat for: "${title}"...`);
-    const results = await scrapeHltb(title);
+    let results = await scrapeHltb(title);
+    
+    // Fallback: If no results, try cleaning the title (removing ™, subtitles, etc.)
+    if (!results || results.length === 0) {
+      const cleanTitle = cleanGameTitleForSearch(title);
+      if (cleanTitle && cleanTitle !== title.toLowerCase().trim()) {
+        console.log(`No results for raw title. Retrying HLTB search with clean title: "${cleanTitle}"...`);
+        results = await scrapeHltb(cleanTitle);
+      }
+    }
     
     let hltbData = null;
     
