@@ -396,6 +396,21 @@ app.get('/api/games', (req, res) => {
 
 // API endpoint to perform a sync with Steam APIs and update the local db
 app.post('/api/sync', async (req, res) => {
+  const { force } = req.body || {};
+  
+  if (force) {
+    console.log('Force Full Refresh requested. Clearing database caches...');
+    dbInMemory = { games: [], hltb: {}, lastSync: 0 };
+    try {
+      if (fs.existsSync(DB_PATH)) {
+        fs.unlinkSync(DB_PATH);
+        console.log('Local db.json file deleted successfully.');
+      }
+    } catch (err) {
+      console.error('Error deleting db.json on force sync:', err);
+    }
+  }
+
   const config = loadConfig();
   const apiKey = config.STEAM_API_KEY;
   let primaryId = config.STEAM_ID;

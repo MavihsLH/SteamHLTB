@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="SteamHLTB-win32-x64">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/dist/SteamHLTB-win32-x64.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -84,7 +84,36 @@ function setupEventListeners() {
   });
 
   if (syncBtn) {
-    syncBtn.addEventListener('click', triggerSync);
+    syncBtn.addEventListener('click', () => {
+      if (games.length > 0) {
+        const syncModal = document.getElementById('sync-options-modal');
+        if (syncModal) syncModal.style.display = 'flex';
+      } else {
+        triggerSync(false);
+      }
+    });
+  }
+
+  // Sync Modal listeners
+  const closeSyncModalBtn = document.getElementById('close-sync-modal-btn');
+  const quickSyncBtn = document.getElementById('quick-sync-btn');
+  const fullSyncBtn = document.getElementById('full-sync-btn');
+  const syncModal = document.getElementById('sync-options-modal');
+
+  if (closeSyncModalBtn && syncModal) {
+    closeSyncModalBtn.addEventListener('click', () => {
+      syncModal.style.display = 'none';
+    });
+  }
+  if (quickSyncBtn) {
+    quickSyncBtn.addEventListener('click', () => {
+      triggerSync(false);
+    });
+  }
+  if (fullSyncBtn) {
+    fullSyncBtn.addEventListener('click', () => {
+      triggerSync(true);
+    });
   }
 
   if (hideZeroCheckbox) {
@@ -148,6 +177,7 @@ function setupEventListeners() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (settingsModal) settingsModal.style.display = 'none';
+      if (syncModal) syncModal.style.display = 'none';
       closeGameDetail();
     }
   });
@@ -192,8 +222,12 @@ function formatLastSyncTime(timestamp) {
 }
 
 // Trigger Steam API Sync and import games
-async function triggerSync() {
+async function triggerSync(force = false) {
   if (!syncBtn) return;
+  
+  // Close the sync options modal if open
+  const syncModal = document.getElementById('sync-options-modal');
+  if (syncModal) syncModal.style.display = 'none';
   
   // Disable button and controls while syncing
   syncBtn.disabled = true;
@@ -210,7 +244,11 @@ async function triggerSync() {
   }
   
   try {
-    const res = await fetch('/api/sync', { method: 'POST' });
+    const res = await fetch('/api/sync', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force })
+    });
     if (!res.ok) {
       const errData = await res.json();
       throw new Error(errData.error || 'Failed to sync with Steam.');
@@ -220,11 +258,13 @@ async function triggerSync() {
     
     // Map new games list and keep existing client-side HLTB cache if available
     const existingHltbMap = new Map();
-    games.forEach(g => {
-      if (g.hltb) {
-        existingHltbMap.set(g.appid, g.hltb);
-      }
-    });
+    if (!force) {
+      games.forEach(g => {
+        if (g.hltb) {
+          existingHltbMap.set(g.appid, g.hltb);
+        }
+      });
+    }
     
     games = data.games.map(game => ({
       ...game,

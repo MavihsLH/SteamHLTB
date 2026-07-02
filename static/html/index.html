@@ -323,6 +323,31 @@
     </div>
   </div>
 
+  <!-- Sync Options Modal -->
+  <div id="sync-options-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-arrows-rotate"></i> Sync Library</h2>
+        <button id="close-sync-modal-btn" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.4; color: var(--text-primary);">
+          An existing database cache was found. How would you like to sync your library?
+        </p>
+        <div class="sync-options-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <button id="quick-sync-btn" class="sync-option-choice-btn">
+            <strong><i class="fa-solid fa-bolt"></i> Quick Incremental Sync</strong>
+            <span>Quickly fetch new Steam games and query missing HLTB times without resetting your cache.</span>
+          </button>
+          <button id="full-sync-btn" class="sync-option-choice-btn full-sync-choice">
+            <strong><i class="fa-solid fa-trash-can"></i> Force Full Refresh</strong>
+            <span>Completely delete the local database, reload your entire library, and fetch all HLTB data from scratch.</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Game Detail Slide-out Panel -->
   <div id="game-detail-panel" class="detail-panel">
     <button id="close-detail-btn" class="detail-close-btn"><i class="fa-solid fa-xmark"></i></button>
