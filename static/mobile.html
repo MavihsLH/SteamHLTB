@@ -23,14 +23,18 @@
     
     <!-- Top Header -->
     <header class="mobile-header">
+      <h1 class="header-logo">Steam<span>HLTB</span></h1>
       <button id="mobile-settings-btn" class="header-action-btn" title="Settings">
         <i class="fa-solid fa-gear"></i>
       </button>
-      <h1 class="header-logo">Steam<span>HLTB</span></h1>
-      <div class="header-status">
-        <span id="mobile-status-indicator" class="status-dot led-orange" title="Status"></span>
-      </div>
     </header>
+
+    <!-- Floating Sync HUD Toast -->
+    <div id="mobile-sync-toast" class="sync-toast-floating" style="display: none;">
+      <i class="fa-solid fa-circle-notch fa-spin"></i>
+      <span>Syncing: <span id="mobile-sync-hud-pct-toast">0%</span></span>
+      <button id="mobile-sync-toast-minimize" class="sync-toast-min-btn">✕</button>
+    </div>
 
     <!-- Scrollable Content Area -->
     <main class="mobile-content">
@@ -142,7 +146,7 @@
 
     </main>
 
-    <!-- Floating Filter Bottom Bar (Quick Sort + Stats HUD) -->
+    <!-- Floating Filter Bottom Bar (Quick Sort HUD) -->
     <footer class="mobile-nav-hud">
       <div class="hud-item sort-selector-hud">
         <i class="fa-solid fa-arrow-down-wide-short"></i>
@@ -154,13 +158,6 @@
           <option value="hltb_main_asc">HLTB Story (Shortest First)</option>
           <option value="hltb_main_desc">HLTB Story (Longest First)</option>
         </select>
-      </div>
-      <div class="hud-divider"></div>
-      <div class="hud-item sync-indicator-hud" id="mobile-sync-hud-badge" style="display: none;">
-        <i class="fa-solid fa-circle-notch fa-spin"></i> Syncing: <span id="mobile-sync-hud-pct">0%</span>
-      </div>
-      <div class="hud-item info-hud" id="mobile-last-sync-badge">
-        <span id="mobile-last-sync-time">Not Synced</span>
       </div>
     </footer>
 
@@ -307,6 +304,34 @@
         </div>
         <button id="dice-open-details-btn" class="dice-open-details-btn">OPEN DETAILS SHEET</button>
         <button id="dice-reroll-btn" class="dice-reroll-btn"><i class="fa-solid fa-dice"></i> ROLL AGAIN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- First-Time Sync Progress Modal -->
+  <div id="mobile-first-sync-overlay" class="bottom-sheet-overlay first-sync-overlay" style="display: none;">
+    <div class="bottom-sheet-content first-sync-sheet">
+      <div class="sheet-header">
+        <h2><i class="fa-solid fa-circle-notch fa-spin"></i> Initializing Backlog</h2>
+      </div>
+      <div class="first-sync-body">
+        <p class="first-sync-desc">
+          We are importing your library and matching play times with HowLongToBeat database.
+        </p>
+        
+        <div class="first-sync-progress-container">
+          <div class="progress-bar-track">
+            <div id="first-sync-progress-bar" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+          <div class="progress-status-row">
+            <span id="first-sync-status-text">Fetching Steam games...</span>
+            <span id="first-sync-pct-text">0%</span>
+          </div>
+        </div>
+        
+        <p class="first-sync-note">Please keep the app open. Larger libraries may take a couple of minutes to finish matching times.</p>
+        
+        <button id="first-sync-background-btn" class="first-sync-bg-btn">Use App in Background</button>
       </div>
     </div>
   </div>

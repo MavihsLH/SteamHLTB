@@ -13,7 +13,6 @@ let manuallyCompleted = new Set(); // appids the user has manually marked as bea
 const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
 // DOM Elements
-const mobileStatusIndicator = document.getElementById('mobile-status-indicator');
 const statBacklogCount = document.getElementById('stat-backlog-count');
 const statBacklogHours = document.getElementById('stat-backlog-hours');
 const statCompletedCount = document.getElementById('stat-completed-count');
@@ -30,9 +29,17 @@ const mobileSetupView = document.getElementById('mobile-setup-view');
 const mobileEmptyView = document.getElementById('mobile-empty-view');
 const mobileNoMatchesView = document.getElementById('mobile-no-matches-view');
 const allGamesHeader = document.getElementById('all-games-header');
-const mobileSyncHudBadge = document.getElementById('mobile-sync-hud-badge');
-const mobileSyncHudPct = document.getElementById('mobile-sync-hud-pct');
-const mobileLastSyncTime = document.getElementById('mobile-last-sync-time');
+
+// Floating sync toast & progress elements
+const mobileSyncToast = document.getElementById('mobile-sync-toast');
+const mobileSyncHudPctToast = document.getElementById('mobile-sync-hud-pct-toast');
+const mobileSyncToastMinimize = document.getElementById('mobile-sync-toast-minimize');
+
+const mobileFirstSyncOverlay = document.getElementById('mobile-first-sync-overlay');
+const firstSyncProgressBar = document.getElementById('first-sync-progress-bar');
+const firstSyncStatusText = document.getElementById('first-sync-status-text');
+const firstSyncPctText = document.getElementById('first-sync-pct-text');
+const firstSyncBackgroundBtn = document.getElementById('first-sync-background-btn');
 
 // Modals
 const mobileSettingsOverlay = document.getElementById('mobile-settings-overlay');
@@ -191,7 +198,7 @@ async function scrapeHltbMobile(gameName) {
 // STEAM LIBRARY SYNC
 // ============================================================================
 
-async function performMobileSync(force) {
+async function performMobileSync(force, onProgressCallback) {
   if (!isMobileApp) return null;
   const { CapacitorHttp } = window.Capacitor.Plugins;
   
@@ -203,6 +210,8 @@ async function performMobileSync(force) {
   const apiKey = config.STEAM_API_KEY;
   let primaryId = config.STEAM_ID;
   const familyIds = config.FAMILY_STEAM_IDS || [];
+  
+  if (onProgressCallback) onProgressCallback('Resolving Steam URL...', 5);
   
   if (isNaN(primaryId)) {
     const resolveRes = await CapacitorHttp.get({ url: `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${primaryId}` });
@@ -220,13 +229,17 @@ async function performMobileSync(force) {
     return response.data?.response?.games || [];
   };
   
+  if (onProgressCallback) onProgressCallback('Importing primary Steam library...', 10);
   const primaryGames = await fetchGames(primaryId);
   const gamesMap = new Map();
   for (const game of primaryGames) {
     gamesMap.set(game.appid, { appid: game.appid, name: game.name, playtime_forever: game.playtime_forever || 0, img_icon_url: game.img_icon_url || '', owner_steamid: primaryId, is_owned: true, source: 'primary' });
   }
   
+  let step = 0;
   for (const memberId of familyIds) {
+    step++;
+    if (onProgressCallback) onProgressCallback(`Importing family member ${step}/${familyIds.length} library...`, 10 + Math.round((step / familyIds.length) * 10));
     let resolvedMemberId = memberId;
     if (isNaN(memberId)) {
       const resolveRes = await CapacitorHttp.get({ url: `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${memberId}` });
@@ -312,41 +325,24 @@ async function fetchLibrary() {
       mobileSetupView.style.display = 'flex';
       mobileGamesGrid.style.display = 'none';
       progressGamesSection.style.display = 'none';
-      mobileStatusIndicator.className = 'status-dot led-orange';
       return;
     }
     
     const data = await getMobileLibrary();
-    mobileStatusIndicator.className = 'status-dot led-green';
-    
     if (data.lastSync === 0 || !data.games || data.games.length === 0) {
       mobileEmptyView.style.display = 'flex';
       mobileGamesGrid.style.display = 'none';
       progressGamesSection.style.display = 'none';
-      mobileLastSyncTime.textContent = 'Not Synced';
       return;
     }
     
     games = data.games.map(g => ({ ...g, hltb: g.hltb || null, hltbLoading: false, hltbError: false }));
-    mobileLastSyncTime.textContent = formatLastSyncTime(data.lastSync);
     
     updateStats();
     handleSearchAndFilter();
   } catch (err) {
     console.error('Failed to load library:', err);
-    mobileStatusIndicator.className = 'status-dot led-orange';
   }
-}
-
-function formatLastSyncTime(timestamp) {
-  if (!timestamp) return 'Never';
-  const diff = Date.now() - timestamp;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return new Date(timestamp).toLocaleDateString();
 }
 
 // ============================================================================
@@ -596,6 +592,21 @@ function setupEventListeners() {
   document.getElementById('mobile-sync-quick-btn').addEventListener('click', () => { mobileSyncModal.style.display = 'none'; startLibrarySyncMobile(false); });
   document.getElementById('mobile-sync-force-btn').addEventListener('click', () => { mobileSyncModal.style.display = 'none'; startLibrarySyncMobile(true); });
   
+  // Floating sync top toast
+  if (mobileSyncToastMinimize) {
+    mobileSyncToastMinimize.addEventListener('click', () => {
+      mobileSyncToast.style.display = 'none';
+    });
+  }
+  
+  // First-time sync background action button
+  if (firstSyncBackgroundBtn) {
+    firstSyncBackgroundBtn.addEventListener('click', () => {
+      mobileFirstSyncOverlay.style.display = 'none';
+      mobileSyncToast.style.display = 'flex';
+    });
+  }
+  
   // Details
   document.getElementById('close-details-btn').addEventListener('click', () => { mobileDetailsOverlay.style.display = 'none'; });
   
@@ -657,14 +668,33 @@ async function saveSettingsMobile(e) {
 // ============================================================================
 
 async function startLibrarySyncMobile(force) {
+  // If first-time sync (no games or last sync 0)
+  const isFirstSync = (games.length === 0);
+  
   try {
     mobileEmptyView.style.display = 'none';
-    mobileLastSyncTime.textContent = 'Syncing...';
     
-    const libraryData = await performMobileSync(force);
+    if (isFirstSync) {
+      if (firstSyncProgressBar) firstSyncProgressBar.style.width = '0%';
+      if (firstSyncStatusText) firstSyncStatusText.textContent = 'Contacting Steam...';
+      if (firstSyncPctText) firstSyncPctText.textContent = '0%';
+      if (mobileFirstSyncOverlay) mobileFirstSyncOverlay.style.display = 'flex';
+    } else {
+      if (mobileSyncToast) {
+        mobileSyncHudPctToast.textContent = '0%';
+        mobileSyncToast.style.display = 'flex';
+      }
+    }
+    
+    const libraryData = await performMobileSync(force, (statusText, pct) => {
+      if (isFirstSync) {
+        if (firstSyncStatusText) firstSyncStatusText.textContent = statusText;
+        if (firstSyncProgressBar) firstSyncProgressBar.style.width = `${pct}%`;
+        if (firstSyncPctText) firstSyncPctText.textContent = `${pct}%`;
+      }
+    });
     
     games = libraryData.games.map(g => ({ ...g, hltb: g.hltb || null, hltbLoading: false, hltbError: false }));
-    mobileLastSyncTime.textContent = formatLastSyncTime(libraryData.lastSync);
     
     updateStats();
     handleSearchAndFilter();
@@ -672,25 +702,31 @@ async function startLibrarySyncMobile(force) {
     // Kick off HLTB background sync
     hltbSyncQueue = games.filter(g => !g.hltb);
     if (hltbSyncQueue.length > 0) {
-      mobileSyncHudBadge.style.display = 'flex';
-      mobileSyncHudPct.textContent = '0%';
-      startHltbSyncMobile();
+      startHltbSyncMobile(isFirstSync);
+    } else {
+      // Completed syncing instantly (all games had cached HLTB data)
+      if (mobileFirstSyncOverlay) mobileFirstSyncOverlay.style.display = 'none';
+      if (mobileSyncToast) mobileSyncToast.style.display = 'none';
     }
   } catch (err) {
     alert(`Sync failed: ${err.message}`);
+    if (mobileFirstSyncOverlay) mobileFirstSyncOverlay.style.display = 'none';
+    if (mobileSyncToast) mobileSyncToast.style.display = 'none';
     await fetchLibrary();
   }
 }
 
-function startHltbSyncMobile() {
+function startHltbSyncMobile(isFirstSync) {
   const workersNeeded = Math.min(MAX_CONCURRENT_SYNC - activeSyncWorkers, hltbSyncQueue.length);
-  for (let i = 0; i < workersNeeded; i++) { processNextQueueItemMobile(); }
+  for (let i = 0; i < workersNeeded; i++) { processNextQueueItemMobile(isFirstSync); }
 }
 
-async function processNextQueueItemMobile() {
+async function processNextQueueItemMobile(isFirstSync) {
   if (hltbSyncQueue.length === 0) {
     if (activeSyncWorkers === 0) {
-      mobileSyncHudBadge.style.display = 'none';
+      if (mobileFirstSyncOverlay) mobileFirstSyncOverlay.style.display = 'none';
+      if (mobileSyncToast) mobileSyncToast.style.display = 'none';
+      
       updateStats();
       handleSearchAndFilter();
     }
@@ -706,6 +742,10 @@ async function processNextQueueItemMobile() {
     if (index !== -1) {
       games[index].hltb = hltbData;
       await saveMobileLibrary({ games: games, lastSync: Date.now() });
+      
+      // Update statistics and cards in REAL-TIME!
+      updateStats();
+      handleSearchAndFilter();
     }
   } catch (err) {
     console.error(`Failed to get HLTB times for ${game.name}:`, err);
@@ -713,10 +753,22 @@ async function processNextQueueItemMobile() {
   
   const total = games.length;
   const processed = games.filter(g => g.hltb !== null).length;
-  mobileSyncHudPct.textContent = `${Math.round((processed / total) * 100)}%`;
+  const pct = total > 0 ? Math.round((processed / total) * 100) : 100;
+  
+  // Update progress bar modal if visible
+  if (isFirstSync && mobileFirstSyncOverlay.style.display !== 'none') {
+    if (firstSyncStatusText) firstSyncStatusText.textContent = `Matching HLTB times: ${processed}/${total} games`;
+    if (firstSyncProgressBar) firstSyncProgressBar.style.width = `${pct}%`;
+    if (firstSyncPctText) firstSyncPctText.textContent = `${pct}%`;
+  }
+  
+  // Update top floating sync toast
+  if (mobileSyncHudPctToast) {
+    mobileSyncHudPctToast.textContent = `${pct}%`;
+  }
   
   activeSyncWorkers--;
-  processNextQueueItemMobile();
+  processNextQueueItemMobile(isFirstSync);
 }
 
 // ============================================================================

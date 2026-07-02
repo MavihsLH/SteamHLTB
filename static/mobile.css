@@ -87,20 +87,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.2rem 1.5rem;
-  background-color: rgba(7, 10, 14, 0.85);
+  padding: 0.6rem 1rem;
+  background-color: rgba(7, 10, 14, 0.95);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border-color);
+  z-index: 10;
 }
 
 .header-action-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
-  font-size: 1.3rem;
+  font-size: 1.15rem;
   cursor: pointer;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -657,33 +658,39 @@ body {
 
 /* Floating Bottom Navigation HUD */
 .mobile-nav-hud {
-  position: absolute;
+  position: fixed;
   bottom: 1rem;
   left: 1.2rem;
   right: 1.2rem;
-  height: 52px;
-  background: rgba(18, 24, 35, 0.9);
+  height: 48px;
+  background: rgba(18, 24, 35, 0.95);
   backdrop-filter: blur(15px);
   border: 1px solid var(--border-color);
-  border-radius: 26px;
+  border-radius: 24px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 0 1.2rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  z-index: 99;
 }
 
 .hud-item {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 500;
+  width: 100%;
 }
 
 .sort-selector-hud {
-  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
 }
 
 .sort-selector-hud select {
@@ -692,9 +699,11 @@ body {
   outline: none;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  width: 100%;
+  text-align: center;
+  text-align-last: center;
+  width: auto;
   cursor: pointer;
 }
 
@@ -1190,4 +1199,119 @@ body {
 /* Arrow indicator color fix */
 .mobile-section-title .arrow-indicator {
   color: var(--accent-orange);
+}
+
+/* Floating Sync Toast at Top */
+.sync-toast-floating {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 4.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  background: rgba(196, 131, 106, 0.15);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--accent-orange);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+.sync-toast-floating i {
+  color: var(--accent-orange);
+}
+
+.sync-toast-min-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding-left: 0.3rem;
+}
+
+/* First-Time Sync Progress Modal */
+.first-sync-overlay {
+  z-index: 200;
+}
+
+.first-sync-sheet {
+  background: #0b0c10;
+  border-top: 1.5px solid var(--accent-orange);
+  box-shadow: 0 -10px 40px rgba(196, 131, 106, 0.2);
+}
+
+.first-sync-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  padding: 0.5rem 0;
+}
+
+.first-sync-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.first-sync-progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-orange) 0%, var(--accent-orange-light) 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-status-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.first-sync-note {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.first-sync-bg-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 0.8rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.first-sync-bg-btn:active {
+  background: rgba(255, 255, 255, 0.05);
 }
