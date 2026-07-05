@@ -1315,3 +1315,213 @@ body {
 .first-sync-bg-btn:active {
   background: rgba(255, 255, 255, 0.05);
 }
+
+/* Advanced Filters Panel */
+.advanced-filters-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 0.8rem 1rem;
+  margin-top: -0.2rem;
+  animation: slide-down-filter 0.25s ease-out;
+}
+
+@keyframes slide-down-filter {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.filter-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.8rem;
+}
+
+.filter-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.filter-col label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.filter-col input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  outline: none;
+  width: 100%;
+}
+
+.filter-col input:focus {
+  border-color: var(--accent-orange);
+}
+
+.filter-clear-btn {
+  background: rgba(217, 136, 128, 0.1);
+  border: 1px solid rgba(217, 136, 128, 0.2);
+  color: var(--accent-red);
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.filter-clear-btn:active {
+  background: rgba(217, 136, 128, 0.25);
+}
+
+.mobile-filter-toggle-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-right: 0.2rem;
+}
+
+.mobile-filter-toggle-btn.active {
+  border-color: var(--accent-orange);
+  color: var(--accent-orange-light);
+  background: rgba(196, 131, 106, 0.12);
+}
+
+.mobile-filter-toggle-btn:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Rematch Sheet Styles */
+.rematch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.rematch-search-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.rematch-search-row input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  outline: none;
+  font-size: 0.9rem;
+}
+
+.rematch-search-row input:focus {
+  border-color: var(--accent-orange);
+}
+
+.rematch-search-action-btn {
+  background: var(--accent-orange);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.rematch-search-action-btn:active {
+  opacity: 0.9;
+}
+
+.rematch-results-scrollable {
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-bottom: 1rem;
+}
+
+.rematch-result-item {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.6rem;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.rematch-result-item:active {
+  border-color: var(--accent-orange);
+  background: rgba(196, 131, 106, 0.05);
+}
+
+.rematch-result-thumb {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.2);
+}
+
+.rematch-result-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.rematch-result-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rematch-result-hours {
+  font-size: 0.7rem;
+  color: var(--accent-orange-light);
+  font-family: var(--font-mono);
+}
+
+.rematch-no-results {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 1.5rem;
+}
+
+.rematch-link {
+  background: #2a2e3d;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin-top: 0.2rem;
+}
+

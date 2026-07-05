@@ -84,9 +84,29 @@
         <div class="mobile-search-bar">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
           <input type="text" id="mobile-search-input" placeholder="Search backlog...">
+          <button id="mobile-filter-toggle-btn" class="mobile-filter-toggle-btn" title="Filter Hours">
+            <i class="fa-solid fa-sliders"></i>
+          </button>
           <button id="mobile-sync-btn" class="mobile-sync-trigger-btn" title="Sync Library">
             <i class="fa-solid fa-arrows-rotate"></i>
           </button>
+        </div>
+
+        <!-- Collapsible Hour Filter Panel -->
+        <div id="mobile-advanced-filters-panel" class="advanced-filters-panel" style="display: none;">
+          <div class="filter-row">
+            <div class="filter-col">
+              <label for="mobile-filter-min-hours">Min HLTB Hours</label>
+              <input type="number" id="mobile-filter-min-hours" placeholder="Min" min="0">
+            </div>
+            <div class="filter-col">
+              <label for="mobile-filter-max-hours">Max HLTB Hours</label>
+              <input type="number" id="mobile-filter-max-hours" placeholder="Max" min="0">
+            </div>
+            <button id="mobile-filter-hours-clear-btn" class="filter-clear-btn" title="Clear Hours">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Filter Chips Scrolling Horizontal -->
@@ -243,6 +263,32 @@
           <a id="details-hltb-link" href="#" class="details-link-btn hltb-link" target="_blank">
             <i class="fa-solid fa-magnifying-glass"></i> View on HowLongToBeat
           </a>
+          <button id="details-rematch-btn" class="details-link-btn rematch-link">
+            <i class="fa-solid fa-arrows-spin"></i> Re-match / Correct HLTB
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HLTB Rematch Overlay (Bottom Sheet) -->
+  <div id="mobile-rematch-overlay" class="bottom-sheet-overlay" style="display: none; z-index: 120;">
+    <div class="bottom-sheet-content rematch-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h2><i class="fa-solid fa-arrows-spin"></i> HLTB Re-match</h2>
+        <button id="close-rematch-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="rematch-body">
+        <p class="rematch-desc">Search HowLongToBeat to find correct gameplay times:</p>
+        <div class="rematch-search-row">
+          <input type="text" id="rematch-search-input" placeholder="Search game title...">
+          <button id="rematch-search-btn" class="rematch-search-action-btn"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </div>
+        
+        <!-- Results Container -->
+        <div class="rematch-results-scrollable" id="rematch-results-list">
+          <!-- Dynamically populated with search results -->
         </div>
       </div>
     </div>

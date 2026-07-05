@@ -10,6 +10,7 @@ let visibleCardCount = 40;
 const BATCH_SIZE = 40;
 let manuallyCompleted = new Set(); // appids the user has manually marked as beaten
 let manuallyUnbeaten = new Set(); // appids the user has manually marked as NOT beaten
+let rematchActiveAppid = null; // appid currently being manually matched
 
 const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
@@ -41,6 +42,21 @@ const firstSyncProgressBar = document.getElementById('first-sync-progress-bar');
 const firstSyncStatusText = document.getElementById('first-sync-status-text');
 const firstSyncPctText = document.getElementById('first-sync-pct-text');
 const firstSyncBackgroundBtn = document.getElementById('first-sync-background-btn');
+
+// Hour Filters elements
+const mobileFilterToggleBtn = document.getElementById('mobile-filter-toggle-btn');
+const mobileAdvancedFiltersPanel = document.getElementById('mobile-advanced-filters-panel');
+const mobileFilterMinHours = document.getElementById('mobile-filter-min-hours');
+const mobileFilterMaxHours = document.getElementById('mobile-filter-max-hours');
+const mobileFilterHoursClearBtn = document.getElementById('mobile-filter-hours-clear-btn');
+
+// Rematch Overlay elements
+const mobileRematchOverlay = document.getElementById('mobile-rematch-overlay');
+const closeRematchSheetBtn = document.getElementById('close-rematch-sheet-btn');
+const rematchSearchInput = document.getElementById('rematch-search-input');
+const rematchSearchBtn = document.getElementById('rematch-search-btn');
+const rematchResultsList = document.getElementById('rematch-results-list');
+const detailsRematchBtn = document.getElementById('details-rematch-btn');
 
 // Modals
 const mobileSettingsOverlay = document.getElementById('mobile-settings-overlay');
@@ -330,6 +346,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   makeBottomSheetSwipable('mobile-sync-modal', '.bottom-sheet-content');
   makeBottomSheetSwipable('mobile-dice-modal', '.bottom-sheet-content');
   makeBottomSheetSwipable('mobile-first-sync-overlay', '.bottom-sheet-content');
+  makeBottomSheetSwipable('mobile-rematch-overlay', '.bottom-sheet-content');
 });
 
 function makeBottomSheetSwipable(overlayId, contentSelector) {
@@ -441,12 +458,22 @@ function updateStats() {
 
 function handleSearchAndFilter() {
   const query = mobileSearchInput.value.toLowerCase().trim();
+  const minVal = mobileFilterMinHours && mobileFilterMinHours.value ? parseFloat(mobileFilterMinHours.value) : null;
+  const maxVal = mobileFilterMaxHours && mobileFilterMaxHours.value ? parseFloat(mobileFilterMaxHours.value) : null;
   
   filteredGames = games.filter(game => {
     if (query && !game.name.toLowerCase().includes(query)) return false;
     
     const playHours = (game.playtime_forever || 0) / 60;
     const beaten = isGameBeaten(game);
+    
+    // Hour filters check
+    if (minVal !== null || maxVal !== null) {
+      if (!game.hltb || game.hltb.notFound) return false;
+      const targetTime = game.hltb.gameplayMain || 0;
+      if (minVal !== null && targetTime < minVal) return false;
+      if (maxVal !== null && targetTime > maxVal) return false;
+    }
     
     switch (currentFilter) {
       case 'owned': return game.is_owned;
@@ -493,8 +520,9 @@ function renderMobileGrids() {
   mobileNoMatchesView.style.display = 'none';
   mobileGamesGrid.style.display = 'grid';
   
-  // "Games in Progress" — only on "all" filter with no search query
-  const showProgress = currentFilter === 'all' && !mobileSearchInput.value;
+  // "Games in Progress" — only on "all" filter with no search query and no hour filters active
+  const hasHourFilters = (mobileFilterMinHours && mobileFilterMinHours.value) || (mobileFilterMaxHours && mobileFilterMaxHours.value);
+  const showProgress = currentFilter === 'all' && !mobileSearchInput.value && !hasHourFilters;
   const inProgress = showProgress ? filteredGames.filter(g => {
     const playHours = (g.playtime_forever || 0) / 60;
     const beatHours = g.hltb && !g.hltb.notFound ? g.hltb.gameplayMain : 0;
@@ -642,6 +670,29 @@ function setupEventListeners() {
     });
   });
   
+  // Hour filters toggles & actions
+  if (mobileFilterToggleBtn) {
+    mobileFilterToggleBtn.addEventListener('click', () => {
+      const shown = mobileAdvancedFiltersPanel.style.display === 'block';
+      mobileAdvancedFiltersPanel.style.display = shown ? 'none' : 'block';
+      mobileFilterToggleBtn.classList.toggle('active', !shown);
+    });
+  }
+  
+  if (mobileFilterMinHours) {
+    mobileFilterMinHours.addEventListener('input', debounce(handleSearchAndFilter, 250));
+  }
+  if (mobileFilterMaxHours) {
+    mobileFilterMaxHours.addEventListener('input', debounce(handleSearchAndFilter, 250));
+  }
+  if (mobileFilterHoursClearBtn) {
+    mobileFilterHoursClearBtn.addEventListener('click', () => {
+      mobileFilterMinHours.value = '';
+      mobileFilterMaxHours.value = '';
+      handleSearchAndFilter();
+    });
+  }
+  
   // Settings
   document.getElementById('mobile-settings-btn').addEventListener('click', openSettingsSheet);
   document.getElementById('mobile-setup-trigger-btn')?.addEventListener('click', openSettingsSheet);
@@ -670,8 +721,32 @@ function setupEventListeners() {
     });
   }
   
-  // Details
+  // Details Sheet Buttons
   document.getElementById('close-details-btn').addEventListener('click', () => { mobileDetailsOverlay.style.display = 'none'; });
+  
+  if (detailsRematchBtn) {
+    detailsRematchBtn.addEventListener('click', () => {
+      const appid = rematchActiveAppid;
+      if (appid) openRematchOverlay(appid);
+    });
+  }
+  
+  // Rematch Sheet Buttons
+  if (closeRematchSheetBtn) {
+    closeRematchSheetBtn.addEventListener('click', () => {
+      mobileRematchOverlay.style.display = 'none';
+    });
+  }
+  if (rematchSearchBtn) {
+    rematchSearchBtn.addEventListener('click', performRematchSearch);
+  }
+  if (rematchSearchInput) {
+    rematchSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        performRematchSearch();
+      }
+    });
+  }
   
   // Dice
   document.getElementById('mobile-dice-btn').addEventListener('click', triggerDicePickerMobile);
@@ -842,6 +917,7 @@ function openGameDetailsSheet(appid) {
   const game = games.find(g => g.appid === appid);
   if (!game) return;
   
+  rematchActiveAppid = appid;
   document.getElementById('details-game-name').textContent = game.name;
   document.getElementById('details-game-img').src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
   
@@ -908,6 +984,92 @@ function openGameDetailsSheet(appid) {
     : `https://howlongtobeat.com/?q=${encodeURIComponent(cleanGameTitleForSearch(game.name))}`;
     
   mobileDetailsOverlay.style.display = 'flex';
+}
+
+// ============================================================================
+// REMATCH ACTIONS
+// ============================================================================
+
+function openRematchOverlay(appid) {
+  const game = games.find(g => g.appid === appid);
+  if (!game) return;
+  
+  rematchActiveAppid = appid;
+  rematchSearchInput.value = game.name;
+  rematchResultsList.innerHTML = '';
+  mobileRematchOverlay.style.display = 'flex';
+}
+
+async function performRematchSearch() {
+  const query = rematchSearchInput.value.trim();
+  if (!query) return;
+  
+  rematchResultsList.innerHTML = `
+    <div class="rematch-no-results">
+      <i class="fa-solid fa-circle-notch fa-spin"></i> Searching HowLongToBeat...
+    </div>
+  `;
+  
+  try {
+    const results = await scrapeHltbMobile(query);
+    if (!results || results.length === 0) {
+      rematchResultsList.innerHTML = `
+        <div class="rematch-no-results">No games found matching "${escapeHtml(query)}"</div>
+      `;
+      return;
+    }
+    
+    rematchResultsList.innerHTML = results.map(r => {
+      const mainHrs = Math.round((r.comp_main || 0) / 3600);
+      const imgUrl = r.game_image ? `https://howlongtobeat.com/games/${r.game_image}` : '';
+      
+      return `
+        <div class="rematch-result-item" onclick="confirmRematchLink(${r.game_id}, '${escapeHtml(r.game_name)}', ${mainHrs}, '${escapeHtml(r.game_image)}')">
+          <img class="rematch-result-thumb" src="${imgUrl}" onerror="this.style.display='none'">
+          <div class="rematch-result-info">
+            <span class="rematch-result-title">${escapeHtml(r.game_name)}</span>
+            <span class="rematch-result-hours">Main Story: ${mainHrs}h</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Rematch search error:', err);
+    rematchResultsList.innerHTML = `
+      <div class="rematch-no-results" style="color: var(--accent-red);">Error: Failed to fetch search results.</div>
+    `;
+  }
+}
+
+async function confirmRematchLink(hltbId, title, mainHrs, imgName) {
+  const appid = rematchActiveAppid;
+  if (!appid) return;
+  
+  const gameIdx = games.findIndex(g => g.appid === appid);
+  if (gameIdx === -1) return;
+  
+  const updatedHltb = {
+    hltbId: String(hltbId),
+    title: title,
+    gameplayMain: mainHrs,
+    gameplayMainExtra: mainHrs,
+    gameplayCompletionist: mainHrs,
+    imageUrl: imgName ? `https://howlongtobeat.com/games/${imgName}` : '',
+    notFound: false
+  };
+  
+  games[gameIdx].hltb = updatedHltb;
+  
+  // Save to mobile storage
+  await saveMobileLibrary({ games: games, lastSync: Date.now() });
+  
+  // Update UI and Stats
+  updateStats();
+  handleSearchAndFilter();
+  
+  // Close rematch overlay and refresh details overlay
+  mobileRematchOverlay.style.display = 'none';
+  openGameDetailsSheet(appid);
 }
 
 // ============================================================================
