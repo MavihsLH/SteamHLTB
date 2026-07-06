@@ -31,6 +31,18 @@ const baseDir = (isPackaged || isElectronPackaged) ? path.dirname(process.execPa
 const CONFIG_PATH = path.join(baseDir, 'config.json');
 const DB_PATH = path.join(baseDir, 'db.json');
 
+// Load preloaded HLTB database for optimizing search queries
+let preloadedHltbData = {};
+try {
+  const preloadedPath = path.join(__dirname, 'static', 'js', 'preloaded_hltb.json');
+  if (fs.existsSync(preloadedPath)) {
+    preloadedHltbData = JSON.parse(fs.readFileSync(preloadedPath, 'utf8'));
+    console.log(`[Startup] Loaded ${Object.keys(preloadedHltbData).length} preloaded offline HLTB game profiles.`);
+  }
+} catch (err) {
+  console.warn('[Startup] Warning: Could not load preloaded HLTB database:', err);
+}
+
 // --- Self-Contained HowLongToBeat Scraper Logic ---
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -578,9 +590,14 @@ function cleanGameTitleForSearch(title) {
 
 // API endpoint to query HLTB data for a specific game
 app.get('/api/hltb', async (req, res) => {
-  const { title } = req.query;
+  const { title, appid } = req.query;
   if (!title) {
     return res.status(400).json({ error: 'title parameter is required.' });
+  }
+
+  // Check preloaded database first
+  if (appid && preloadedHltbData && preloadedHltbData[appid]) {
+    return res.json(preloadedHltbData[appid]);
   }
 
   const db = loadDb();

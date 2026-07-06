@@ -1,0 +1,12 @@
+{
+  "570": { "hltbId": "2811", "title": "Dota 2", "gameplayMain": 0, "gameplayMainExtra": 0, "gameplayCompletionist": 0, "imageUrl": "", "notFound": false },
+  "730": { "hltbId": "1910", "title": "Counter-Strike: Global Offensive", "gameplayMain": 0, "gameplayMainExtra": 0, "gameplayCompletionist": 0, "imageUrl": "", "notFound": false },
+  "271590": { "hltbId": "4064", "title": "Grand Theft Auto V", "gameplayMain": 32, "gameplayMainExtra": 49, "gameplayCompletionist": 82, "imageUrl": "", "notFound": false },
+  "292030": { "hltbId": "10270", "title": "The Witcher 3: Wild Hunt", "gameplayMain": 52, "gameplayMainExtra": 103, "gameplayCompletionist": 173, "imageUrl": "", "notFound": false },
+  "105600": { "hltbId": "9811", "title": "Terraria", "gameplayMain": 50, "gameplayMainExtra": 105, "gameplayCompletionist": 210, "imageUrl": "", "notFound": false },
+  "230410": { "hltbId": "11417", "title": "Warframe", "gameplayMain": 114, "gameplayMainExtra": 450, "gameplayCompletionist": 1000, "imageUrl": "", "notFound": false },
+  "227300": { "hltbId": "3220", "title": "Euro Truck Simulator 2", "gameplayMain": 46, "gameplayMainExtra": 112, "gameplayCompletionist": 300, "imageUrl": "", "notFound": false },
+  "632360": { "hltbId": "34992", "title": "Risk of Rain 2", "gameplayMain": 10, "gameplayMainExtra": 25, "gameplayCompletionist": 70, "imageUrl": "", "notFound": false },
+  "367520": { "hltbId": "26286", "title": "Hollow Knight", "gameplayMain": 27, "gameplayMainExtra": 41, "gameplayCompletionist": 62, "imageUrl": "", "notFound": false },
+  "1145360": { "hltbId": "62963", "title": "Hades", "gameplayMain": 22, "gameplayMainExtra": 48, "gameplayCompletionist": 96, "imageUrl": "", "notFound": false }
+}

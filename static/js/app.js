@@ -283,7 +283,7 @@ async function fetchHltbData(game) {
       };
     }
   } else {
-    const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}`);
+    const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}&appid=${game.appid}`);
     if (!res.ok) throw new Error('HLTB fetch failed');
     return await res.json();
   }

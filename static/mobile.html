@@ -1,17 +1,22 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>SteamHLTB Mobile</title>
   <!-- Google Fonts: Outfit and DotGothic16 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DotGothic16&family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DotGothic16&family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
   <!-- FontAwesome for icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="mobile.css">
 </head>
+
 <body>
 
   <!-- Background Ambient Glows -->
@@ -20,7 +25,7 @@
 
   <!-- Mobile App Wrapper -->
   <div class="mobile-wrapper">
-    
+
     <!-- Top Header -->
     <header class="mobile-header">
       <h1 class="header-logo">Steam<span>HLTB</span></h1>
@@ -49,7 +54,7 @@
           <div class="stat-card-value" id="stat-backlog-count">0 <span class="stat-card-sub">Games</span></div>
           <div class="stat-card-meta" id="stat-backlog-hours">0h Total</div>
         </div>
-        
+
         <div class="stat-card card-completed">
           <div class="stat-card-header">
             <span class="stat-card-label">COMPLETED</span>
@@ -121,7 +126,7 @@
       </section>
 
       <!-- Games List/Grid Sections -->
-      
+
       <!-- 1. Games in Progress (Beating) -->
       <section class="section-games-progress" id="progress-games-section" style="display: none;">
         <h3 class="mobile-section-title">GAMES IN PROGRESS <span class="arrow-indicator">↗</span></h3>
@@ -133,7 +138,7 @@
       <!-- 2. Backlog / All Games -->
       <section class="section-games-all">
         <h3 class="mobile-section-title" id="all-games-header">YOUR BACKLOG</h3>
-        
+
         <!-- Empty / Setup States -->
         <div id="mobile-setup-view" class="mobile-status-card" style="display: none;">
           <i class="fa-solid fa-triangle-exclamation status-card-icon-large"></i>
@@ -195,7 +200,8 @@
         <div class="sheet-form-group">
           <label for="mobile-settings-api-key">STEAM API KEY</label>
           <input type="password" id="mobile-settings-api-key" placeholder="Enter Steam Web API Key">
-          <span class="input-subtitle">Get it from <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a></span>
+          <span class="input-subtitle">Get it from <a href="https://steamcommunity.com/dev/apikey"
+              target="_blank">steamcommunity.com/dev/apikey</a></span>
         </div>
         <div class="sheet-form-group">
           <label for="mobile-settings-steam-id">STEAM USER ID</label>
@@ -203,7 +209,8 @@
         </div>
         <div class="sheet-form-group">
           <label for="mobile-settings-family-ids">FAMILY MEMBER STEAM IDS (Optional)</label>
-          <textarea id="mobile-settings-family-ids" placeholder="Enter comma-separated IDs (e.g. 76561198xxx, 76561198yyy)"></textarea>
+          <textarea id="mobile-settings-family-ids"
+            placeholder="Enter comma-separated IDs (e.g. 76561198xxx, 76561198yyy)"></textarea>
           <span class="input-subtitle">Enables shared library backlogs tracking</span>
         </div>
         <button type="submit" class="sheet-save-btn">SAVE SETTINGS</button>
@@ -224,7 +231,7 @@
           <img id="details-game-img" src="" alt="Game cover">
           <span class="details-owner-badge" id="details-owner-badge">Owned</span>
         </div>
-        
+
         <div class="details-metrics-row">
           <div class="detail-metric">
             <span class="metric-label">PLAYTIME</span>
@@ -266,6 +273,9 @@
           <button id="details-rematch-btn" class="details-link-btn rematch-link">
             <i class="fa-solid fa-arrows-spin"></i> Re-match / Correct HLTB
           </button>
+          <button id="details-refresh-btn" class="details-link-btn refresh-link">
+            <i class="fa-solid fa-arrows-rotate"></i> Force Refresh HLTB Data
+          </button>
         </div>
       </div>
     </div>
@@ -283,9 +293,10 @@
         <p class="rematch-desc">Search HowLongToBeat to find correct gameplay times:</p>
         <div class="rematch-search-row">
           <input type="text" id="rematch-search-input" placeholder="Search game title...">
-          <button id="rematch-search-btn" class="rematch-search-action-btn"><i class="fa-solid fa-magnifying-glass"></i></button>
+          <button id="rematch-search-btn" class="rematch-search-action-btn"><i
+              class="fa-solid fa-magnifying-glass"></i></button>
         </div>
-        
+
         <!-- Results Container -->
         <div class="rematch-results-scrollable" id="rematch-results-list">
           <!-- Dynamically populated with search results -->
@@ -311,7 +322,7 @@
             <span class="choice-desc">Import new purchases and update recent play times (Fast)</span>
           </div>
         </button>
-        
+
         <button class="mobile-sync-choice-btn warning" id="mobile-sync-force-btn">
           <i class="fa-solid fa-arrows-spin choice-icon"></i>
           <div class="choice-info">
@@ -364,7 +375,7 @@
         <p class="first-sync-desc">
           We are importing your library and matching play times with HowLongToBeat database.
         </p>
-        
+
         <div class="first-sync-progress-container">
           <div class="progress-bar-track">
             <div id="first-sync-progress-bar" class="progress-bar-fill" style="width: 0%;"></div>
@@ -374,9 +385,10 @@
             <span id="first-sync-pct-text">0%</span>
           </div>
         </div>
-        
-        <p class="first-sync-note">Please keep the app open. Larger libraries may take a couple of minutes to finish matching times.</p>
-        
+
+        <p class="first-sync-note">Please keep the app open. Larger libraries may take a couple of minutes to finish
+          matching times.</p>
+
         <button id="first-sync-background-btn" class="first-sync-bg-btn">Use App in Background</button>
       </div>
     </div>
@@ -386,4 +398,5 @@
   <script src="capacitor.js"></script>
   <script src="mobile.js"></script>
 </body>
+
 </html>
