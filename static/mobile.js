@@ -246,6 +246,111 @@ async function fetchSteamStoreMetadata(appid) {
 }
 
 // ============================================================================
+// WIKIDATA SPARQL METADATA FETCH (Free, no API key, CC0 license)
+// ============================================================================
+
+async function fetchWikidataMetadata(appid) {
+  if (!isMobileApp) return null;
+  const { CapacitorHttp } = window.Capacitor.Plugins;
+  try {
+    const sparql = `
+SELECT ?gameLabel ?genreLabel ?developerLabel ?publisherLabel ?platformLabel ?pubDate WHERE {
+  ?game wdt:P1733 "${appid}".
+  OPTIONAL { ?game wdt:P136 ?genre. }
+  OPTIONAL { ?game wdt:P178 ?developer. }
+  OPTIONAL { ?game wdt:P123 ?publisher. }
+  OPTIONAL { ?game wdt:P400 ?platform. }
+  OPTIONAL { ?game wdt:P577 ?pubDate. }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+LIMIT 50`;
+
+    const response = await CapacitorHttp.get({
+      url: `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`,
+      headers: {
+        'Accept': 'application/sparql-results+json',
+        'User-Agent': 'SteamHLTB-App/1.0 (https://github.com/MavihsLH/SteamHLTB)'
+      }
+    });
+
+    if (response.status !== 200 || !response.data) return null;
+
+    const bindings = response.data?.results?.bindings;
+    if (!bindings || bindings.length === 0) return null;
+
+    // Aggregate multi-row results (a game can have multiple genres/devs/etc.)
+    const genresSet = new Set();
+    const devsSet = new Set();
+    const pubsSet = new Set();
+    const platsSet = new Set();
+    let releaseYear = null;
+
+    for (const row of bindings) {
+      if (row.genreLabel?.value) genresSet.add(row.genreLabel.value);
+      if (row.developerLabel?.value) devsSet.add(row.developerLabel.value);
+      if (row.publisherLabel?.value) pubsSet.add(row.publisherLabel.value);
+      if (row.platformLabel?.value) platsSet.add(row.platformLabel.value);
+      if (!releaseYear && row.pubDate?.value) {
+        const year = extractYear(row.pubDate.value);
+        if (year) releaseYear = year;
+      }
+    }
+
+    // Only return if we got at least some useful data
+    if (genresSet.size === 0 && devsSet.size === 0) return null;
+
+    return {
+      genres: Array.from(genresSet).join(', '),
+      developers: Array.from(devsSet).join(', '),
+      publishers: Array.from(pubsSet).join(', '),
+      platforms: Array.from(platsSet).join(', '),
+      releaseYear: releaseYear
+    };
+  } catch (err) {
+    console.warn('Wikidata SPARQL query failed:', err);
+    return null;
+  }
+}
+
+// ============================================================================
+// UNIFIED METADATA FALLBACK CHAIN: Dataset → Wikidata → Steam API
+// ============================================================================
+
+async function fetchGameMetadataChain(appid, gameName) {
+  // Step 1: Check preloaded dataset
+  const cleanedTitle = cleanGameTitleForSearch(gameName);
+  const datasetEntry = (cleanedTitle && preloadedHltbData) ? preloadedHltbData[cleanedTitle] : null;
+  if (datasetEntry && (datasetEntry.genres || datasetEntry.developers)) {
+    console.log(`[Meta] ${gameName}: found in dataset`);
+    return {
+      genres: datasetEntry.genres || '',
+      developers: datasetEntry.developers || '',
+      publishers: datasetEntry.publishers || '',
+      platforms: datasetEntry.platforms || '',
+      releaseYear: datasetEntry.releaseYear || null,
+      source: 'dataset'
+    };
+  }
+
+  // Step 2: Try Wikidata SPARQL (free, no key needed)
+  const wikiMeta = await fetchWikidataMetadata(appid);
+  if (wikiMeta) {
+    console.log(`[Meta] ${gameName}: found on Wikidata`);
+    return { ...wikiMeta, source: 'wikidata' };
+  }
+
+  // Step 3: Last resort — Steam Store API
+  const steamMeta = await fetchSteamStoreMetadata(appid);
+  if (steamMeta) {
+    console.log(`[Meta] ${gameName}: found via Steam Store API`);
+    return { ...steamMeta, source: 'steam' };
+  }
+
+  console.log(`[Meta] ${gameName}: no metadata found from any source`);
+  return null;
+}
+
+// ============================================================================
 // HLTB MOBILE SCRAPER
 // ============================================================================
 
@@ -1239,46 +1344,27 @@ function openGameDetailsSheet(appid) {
     } else {
       metaSection.style.display = 'none';
       
-      // On-demand metadata: check preloaded dataset FIRST, then Steam API as fallback
+      // On-demand metadata: Dataset → Wikidata → Steam API
       if (game.hltb && !game.hltb.notFound) {
-        const cleanedTitle = cleanGameTitleForSearch(game.name);
-        const datasetEntry = (cleanedTitle && preloadedHltbData) ? preloadedHltbData[cleanedTitle] : null;
-        
-        if (datasetEntry && (datasetEntry.genres || datasetEntry.developers)) {
-          // Use dataset metadata directly — no API call needed
-          game.hltb.genres = datasetEntry.genres || '';
-          game.hltb.developers = datasetEntry.developers || '';
-          game.hltb.publishers = datasetEntry.publishers || '';
-          game.hltb.platforms = datasetEntry.platforms || '';
-          game.hltb.releaseYear = datasetEntry.releaseYear || null;
-          
-          saveMobileLibrary({ games: games, lastSync: Date.now() });
-          
-          document.getElementById('details-meta-genres').textContent = datasetEntry.genres || 'Unknown';
-          document.getElementById('details-meta-developer').textContent = datasetEntry.developers || 'Unknown';
-          document.getElementById('details-meta-release').textContent = datasetEntry.releaseYear || 'Unknown';
-          document.getElementById('details-meta-platforms').textContent = datasetEntry.platforms || 'Unknown';
-          metaSection.style.display = 'flex';
-        } else {
-          // Fallback: hit Steam Store API (only for games not in dataset)
-          fetchSteamStoreMetadata(game.appid).then(async (meta) => {
-            if (meta && rematchActiveAppid === appid) {
-              game.hltb.developers = meta.developers;
-              game.hltb.publishers = meta.publishers;
-              game.hltb.genres = meta.genres;
-              game.hltb.platforms = meta.platforms;
-              game.hltb.releaseYear = meta.releaseYear;
-              
-              await saveMobileLibrary({ games: games, lastSync: Date.now() });
-              
-              document.getElementById('details-meta-genres').textContent = meta.genres || 'Unknown';
-              document.getElementById('details-meta-developer').textContent = meta.developers || 'Unknown';
-              document.getElementById('details-meta-release').textContent = meta.releaseYear || 'Unknown';
-              document.getElementById('details-meta-platforms').textContent = meta.platforms || 'Unknown';
-              metaSection.style.display = 'flex';
-            }
-          });
-        }
+        fetchGameMetadataChain(game.appid, game.name).then(async (meta) => {
+          if (meta && rematchActiveAppid === appid) {
+            game.hltb.genres = meta.genres;
+            game.hltb.developers = meta.developers;
+            game.hltb.publishers = meta.publishers;
+            game.hltb.platforms = meta.platforms;
+            game.hltb.releaseYear = meta.releaseYear;
+            
+            await saveMobileLibrary({ games: games, lastSync: Date.now() });
+            populateFilterDropdowns();
+            
+            document.getElementById('details-meta-genres').textContent = meta.genres || 'Unknown';
+            document.getElementById('details-meta-developer').textContent = meta.developers || 'Unknown';
+            document.getElementById('details-meta-release').textContent = meta.releaseYear || 'Unknown';
+            document.getElementById('details-meta-platforms').textContent = meta.platforms || 'Unknown';
+            metaSection.style.display = 'flex';
+          }
+        });
+      }
     }
   }
   
@@ -1364,25 +1450,14 @@ async function confirmRematchLink(hltbId, title, mainHrs, imgName) {
   
   games[gameIdx].hltb = updatedHltb;
   
-  // Fetch metadata: check preloaded dataset first, then Steam API as fallback
-  const rematchCleanedTitle = cleanGameTitleForSearch(games[gameIdx].name);
-  const rematchDatasetEntry = (rematchCleanedTitle && preloadedHltbData) ? preloadedHltbData[rematchCleanedTitle] : null;
-  
-  if (rematchDatasetEntry && (rematchDatasetEntry.genres || rematchDatasetEntry.developers)) {
-    games[gameIdx].hltb.genres = rematchDatasetEntry.genres || '';
-    games[gameIdx].hltb.developers = rematchDatasetEntry.developers || '';
-    games[gameIdx].hltb.publishers = rematchDatasetEntry.publishers || '';
-    games[gameIdx].hltb.platforms = rematchDatasetEntry.platforms || '';
-    games[gameIdx].hltb.releaseYear = rematchDatasetEntry.releaseYear || null;
-  } else {
-    const meta = await fetchSteamStoreMetadata(appid);
-    if (meta) {
-      games[gameIdx].hltb.developers = meta.developers;
-      games[gameIdx].hltb.publishers = meta.publishers;
-      games[gameIdx].hltb.genres = meta.genres;
-      games[gameIdx].hltb.platforms = meta.platforms;
-      games[gameIdx].hltb.releaseYear = meta.releaseYear;
-    }
+  // Fetch metadata: Dataset → Wikidata → Steam API
+  const rematchMeta = await fetchGameMetadataChain(appid, games[gameIdx].name);
+  if (rematchMeta) {
+    games[gameIdx].hltb.genres = rematchMeta.genres || '';
+    games[gameIdx].hltb.developers = rematchMeta.developers || '';
+    games[gameIdx].hltb.publishers = rematchMeta.publishers || '';
+    games[gameIdx].hltb.platforms = rematchMeta.platforms || '';
+    games[gameIdx].hltb.releaseYear = rematchMeta.releaseYear || null;
   }
   
   // Save to mobile storage
