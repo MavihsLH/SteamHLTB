@@ -89,29 +89,9 @@
         <div class="mobile-search-bar">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
           <input type="text" id="mobile-search-input" placeholder="Search backlog...">
-          <button id="mobile-filter-toggle-btn" class="mobile-filter-toggle-btn" title="Filter Hours">
-            <i class="fa-solid fa-sliders"></i>
-          </button>
           <button id="mobile-sync-btn" class="mobile-sync-trigger-btn" title="Sync Library">
             <i class="fa-solid fa-arrows-rotate"></i>
           </button>
-        </div>
-
-        <!-- Collapsible Hour Filter Panel -->
-        <div id="mobile-advanced-filters-panel" class="advanced-filters-panel" style="display: none;">
-          <div class="filter-row">
-            <div class="filter-col">
-              <label for="mobile-filter-min-hours">Min HLTB Hours</label>
-              <input type="number" id="mobile-filter-min-hours" placeholder="Min" min="0">
-            </div>
-            <div class="filter-col">
-              <label for="mobile-filter-max-hours">Max HLTB Hours</label>
-              <input type="number" id="mobile-filter-max-hours" placeholder="Max" min="0">
-            </div>
-            <button id="mobile-filter-hours-clear-btn" class="filter-clear-btn" title="Clear Hours">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
         </div>
 
         <!-- Filter Chips Scrolling Horizontal -->
@@ -171,18 +151,11 @@
 
     </main>
 
-    <!-- Floating Filter Bottom Bar (Quick Sort HUD) -->
-    <footer class="mobile-nav-hud">
-      <div class="hud-item sort-selector-hud">
-        <i class="fa-solid fa-arrow-down-wide-short"></i>
-        <select id="mobile-sort-select">
-          <option value="playtime_desc">Playtime (High to Low)</option>
-          <option value="playtime_asc">Playtime (Low to High)</option>
-          <option value="name_asc">Name (A to Z)</option>
-          <option value="name_desc">Name (Z to A)</option>
-          <option value="hltb_main_asc">HLTB Story (Shortest First)</option>
-          <option value="hltb_main_desc">HLTB Story (Longest First)</option>
-        </select>
+    <!-- Floating Filter Bottom Bar (Unified HUD) -->
+    <footer class="mobile-nav-hud" id="mobile-filter-hud-trigger">
+      <div class="hud-item filter-hud-item">
+        <i class="fa-solid fa-sliders"></i>
+        <span>Filter & Sort</span>
       </div>
     </footer>
 
@@ -414,6 +387,72 @@
           matching times.</p>
 
         <button id="first-sync-background-btn" class="first-sync-bg-btn">Use App in Background</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unified Filter & Refine Bottom Sheet -->
+  <div id="mobile-filter-sheet-overlay" class="bottom-sheet-overlay" style="display: none; z-index: 105;">
+    <div class="bottom-sheet-content filter-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h2><i class="fa-solid fa-filter text-orange"></i> Filter & Sort</h2>
+        <button id="close-filter-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="details-sheet-scrollable filter-sheet-body">
+        
+        <!-- Sort Section -->
+        <div class="sheet-form-group">
+          <label for="filter-sheet-sort">SORT ORDER</label>
+          <select id="filter-sheet-sort">
+            <option value="playtime_desc">Playtime (High to Low)</option>
+            <option value="playtime_asc">Playtime (Low to High)</option>
+            <option value="name_asc">Name (A to Z)</option>
+            <option value="name_desc">Name (Z to A)</option>
+            <option value="hltb_main_asc">HLTB Story (Shortest First)</option>
+            <option value="hltb_main_desc">HLTB Story (Longest First)</option>
+          </select>
+        </div>
+
+        <!-- HLTB Hours Range -->
+        <div class="sheet-form-group">
+          <label>GAMEPLAY LENGTH (HOURS)</label>
+          <div class="filter-hours-inputs">
+            <input type="number" id="filter-sheet-min-hours" placeholder="Min" min="0">
+            <span class="range-divider">to</span>
+            <input type="number" id="filter-sheet-max-hours" placeholder="Max" min="0">
+          </div>
+        </div>
+
+        <!-- Genre Selection -->
+        <div class="sheet-form-group">
+          <label for="filter-sheet-genre">GENRE</label>
+          <select id="filter-sheet-genre">
+            <option value="all">All Genres</option>
+          </select>
+        </div>
+
+        <!-- Developer Selection -->
+        <div class="sheet-form-group">
+          <label for="filter-sheet-developer">DEVELOPER</label>
+          <select id="filter-sheet-developer">
+            <option value="all">All Developers</option>
+          </select>
+        </div>
+
+        <!-- Platform Selection -->
+        <div class="sheet-form-group">
+          <label for="filter-sheet-platform">PLATFORM</label>
+          <select id="filter-sheet-platform">
+            <option value="all">All Platforms</option>
+          </select>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="filter-actions-row">
+          <button id="filter-sheet-clear-btn" class="filter-sheet-btn secondary-btn">Clear All</button>
+          <button id="filter-sheet-apply-btn" class="filter-sheet-btn primary-btn">Apply</button>
+        </div>
       </div>
     </div>
   </div>

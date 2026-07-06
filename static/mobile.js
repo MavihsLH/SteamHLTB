@@ -13,6 +13,13 @@ let manuallyUnbeaten = new Set(); // appids the user has manually marked as NOT 
 let rematchActiveAppid = null; // appid currently being manually matched
 let preloadedHltbData = {}; // Enriched preloaded HLTB metadata cache
 
+// Unified Filter States
+let filterMinHours = null;
+let filterMaxHours = null;
+let currentGenre = 'all';
+let currentDeveloper = 'all';
+let currentPlatform = 'all';
+
 const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
 // DOM Elements
@@ -23,7 +30,6 @@ const statCompletedHours = document.getElementById('stat-completed-hours');
 const statNextUpName = document.getElementById('stat-next-up-name');
 const statNextUpTime = document.getElementById('stat-next-up-time');
 const mobileSearchInput = document.getElementById('mobile-search-input');
-const mobileSortSelect = document.getElementById('mobile-sort-select');
 const filterChips = document.querySelectorAll('.filter-chip');
 const progressGamesSection = document.getElementById('progress-games-section');
 const progressGamesGrid = document.getElementById('progress-games-grid');
@@ -44,13 +50,6 @@ const firstSyncStatusText = document.getElementById('first-sync-status-text');
 const firstSyncPctText = document.getElementById('first-sync-pct-text');
 const firstSyncBackgroundBtn = document.getElementById('first-sync-background-btn');
 
-// Hour Filters elements
-const mobileFilterToggleBtn = document.getElementById('mobile-filter-toggle-btn');
-const mobileAdvancedFiltersPanel = document.getElementById('mobile-advanced-filters-panel');
-const mobileFilterMinHours = document.getElementById('mobile-filter-min-hours');
-const mobileFilterMaxHours = document.getElementById('mobile-filter-max-hours');
-const mobileFilterHoursClearBtn = document.getElementById('mobile-filter-hours-clear-btn');
-
 // Rematch Overlay elements
 const mobileRematchOverlay = document.getElementById('mobile-rematch-overlay');
 const closeRematchSheetBtn = document.getElementById('close-rematch-sheet-btn');
@@ -59,6 +58,19 @@ const rematchSearchBtn = document.getElementById('rematch-search-btn');
 const rematchResultsList = document.getElementById('rematch-results-list');
 const detailsRematchBtn = document.getElementById('details-rematch-btn');
 const detailsRefreshBtn = document.getElementById('details-refresh-btn');
+
+// Unified Filter elements
+const mobileFilterSheetOverlay = document.getElementById('mobile-filter-sheet-overlay');
+const closeFilterSheetBtn = document.getElementById('close-filter-sheet-btn');
+const mobileFilterHudTrigger = document.getElementById('mobile-filter-hud-trigger');
+const filterSheetSort = document.getElementById('filter-sheet-sort');
+const filterSheetMinHours = document.getElementById('filter-sheet-min-hours');
+const filterSheetMaxHours = document.getElementById('filter-sheet-max-hours');
+const filterSheetGenre = document.getElementById('filter-sheet-genre');
+const filterSheetDeveloper = document.getElementById('filter-sheet-developer');
+const filterSheetPlatform = document.getElementById('filter-sheet-platform');
+const filterSheetClearBtn = document.getElementById('filter-sheet-clear-btn');
+const filterSheetApplyBtn = document.getElementById('filter-sheet-apply-btn');
 
 // Modals
 const mobileSettingsOverlay = document.getElementById('mobile-settings-overlay');
@@ -213,8 +225,9 @@ async function fetchSteamStoreMetadata(appid) {
   if (!isMobileApp) return null;
   const { CapacitorHttp } = window.Capacitor.Plugins;
   try {
+    // Force English language response with l=english parameter
     const response = await CapacitorHttp.get({
-      url: `https://store.steampowered.com/api/appdetails?appids=${appid}`
+      url: `https://store.steampowered.com/api/appdetails?appids=${appid}&l=english`
     });
     if (response.status === 200 && response.data && response.data[appid] && response.data[appid].success) {
       const data = response.data[appid].data;
@@ -406,6 +419,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   makeBottomSheetSwipable('mobile-dice-modal', '.bottom-sheet-content');
   makeBottomSheetSwipable('mobile-first-sync-overlay', '.bottom-sheet-content');
   makeBottomSheetSwipable('mobile-rematch-overlay', '.bottom-sheet-content');
+  makeBottomSheetSwipable('mobile-filter-sheet-overlay', '.bottom-sheet-content');
 });
 
 function makeBottomSheetSwipable(overlayId, contentSelector) {
@@ -478,6 +492,7 @@ async function fetchLibrary() {
     games = data.games.map(g => ({ ...g, hltb: g.hltb || null, hltbLoading: false, hltbError: false }));
     
     updateStats();
+    populateFilterDropdowns();
     handleSearchAndFilter();
   } catch (err) {
     console.error('Failed to load library:', err);
@@ -512,13 +527,53 @@ function updateStats() {
 }
 
 // ============================================================================
-// FILTER & SORT
+// FILTER & SORT DYNAMIC DROPDOWNS
 // ============================================================================
+
+function populateFilterDropdowns() {
+  const genresSet = new Set();
+  const developersSet = new Set();
+  const platformsSet = new Set();
+  
+  games.forEach(g => {
+    if (g.hltb && !g.hltb.notFound) {
+      if (g.hltb.genres) {
+        g.hltb.genres.split(',').forEach(genre => {
+          if (genre.trim()) genresSet.add(genre.trim());
+        });
+      }
+      if (g.hltb.developers) {
+        g.hltb.developers.split(',').forEach(dev => {
+          if (dev.trim()) developersSet.add(dev.trim());
+        });
+      }
+      if (g.hltb.platforms) {
+        g.hltb.platforms.split(',').forEach(plat => {
+          if (plat.trim()) platformsSet.add(plat.trim());
+        });
+      }
+    }
+  });
+  
+  if (filterSheetGenre) {
+    filterSheetGenre.innerHTML = '<option value="all">All Genres</option>' + 
+      Array.from(genresSet).sort().map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+    filterSheetGenre.value = currentGenre;
+  }
+  if (filterSheetDeveloper) {
+    filterSheetDeveloper.innerHTML = '<option value="all">All Developers</option>' + 
+      Array.from(developersSet).sort().map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+    filterSheetDeveloper.value = currentDeveloper;
+  }
+  if (filterSheetPlatform) {
+    filterSheetPlatform.innerHTML = '<option value="all">All Platforms</option>' + 
+      Array.from(platformsSet).sort().map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+    filterSheetPlatform.value = currentPlatform;
+  }
+}
 
 function handleSearchAndFilter() {
   const query = mobileSearchInput.value.toLowerCase().trim();
-  const minVal = mobileFilterMinHours && mobileFilterMinHours.value ? parseFloat(mobileFilterMinHours.value) : null;
-  const maxVal = mobileFilterMaxHours && mobileFilterMaxHours.value ? parseFloat(mobileFilterMaxHours.value) : null;
   
   filteredGames = games.filter(game => {
     if (query && !game.name.toLowerCase().includes(query)) return false;
@@ -527,11 +582,32 @@ function handleSearchAndFilter() {
     const beaten = isGameBeaten(game);
     
     // Hour filters check
-    if (minVal !== null || maxVal !== null) {
+    if (filterMinHours !== null || filterMaxHours !== null) {
       if (!game.hltb || game.hltb.notFound) return false;
       const targetTime = game.hltb.gameplayMain || 0;
-      if (minVal !== null && targetTime < minVal) return false;
-      if (maxVal !== null && targetTime > maxVal) return false;
+      if (filterMinHours !== null && targetTime < filterMinHours) return false;
+      if (filterMaxHours !== null && targetTime > filterMaxHours) return false;
+    }
+    
+    // Genre filter check
+    if (currentGenre !== 'all') {
+      if (!game.hltb || !game.hltb.genres) return false;
+      const genresArray = game.hltb.genres.split(',').map(g => g.trim());
+      if (!genresArray.includes(currentGenre)) return false;
+    }
+    
+    // Developer filter check
+    if (currentDeveloper !== 'all') {
+      if (!game.hltb || !game.hltb.developers) return false;
+      const devsArray = game.hltb.developers.split(',').map(d => d.trim());
+      if (!devsArray.includes(currentDeveloper)) return false;
+    }
+    
+    // Platform filter check
+    if (currentPlatform !== 'all') {
+      if (!game.hltb || !game.hltb.platforms) return false;
+      const platsArray = game.hltb.platforms.split(',').map(p => p.trim());
+      if (!platsArray.includes(currentPlatform)) return false;
     }
     
     switch (currentFilter) {
@@ -579,9 +655,9 @@ function renderMobileGrids() {
   mobileNoMatchesView.style.display = 'none';
   mobileGamesGrid.style.display = 'grid';
   
-  // "Games in Progress" — only on "all" filter with no search query and no hour filters active
-  const hasHourFilters = (mobileFilterMinHours && mobileFilterMinHours.value) || (mobileFilterMaxHours && mobileFilterMaxHours.value);
-  const showProgress = currentFilter === 'all' && !mobileSearchInput.value && !hasHourFilters;
+  // "Games in Progress" — only on "all" filter with no search query and no hour or dropdown filters active
+  const hasAdvancedFilters = filterMinHours !== null || filterMaxHours !== null || currentGenre !== 'all' || currentDeveloper !== 'all' || currentPlatform !== 'all';
+  const showProgress = currentFilter === 'all' && !mobileSearchInput.value && !hasAdvancedFilters;
   const inProgress = showProgress ? filteredGames.filter(g => {
     const playHours = (g.playtime_forever || 0) / 60;
     const beatHours = g.hltb && !g.hltb.notFound ? g.hltb.gameplayMain : 0;
@@ -629,7 +705,7 @@ function renderMobileGrids() {
     progressGamesSection.style.display = 'none';
   }
   
-  // Build the general backlog grid (all filtered games minus the progress ones shown above)
+  // Build the general backlog grid
   let gridGames = filteredGames;
   if (inProgress.length > 0) {
     const progressIds = new Set(inProgress.slice(0, 5).map(g => g.appid));
@@ -715,11 +791,6 @@ if (contentArea) {
 function setupEventListeners() {
   mobileSearchInput.addEventListener('input', debounce(handleSearchAndFilter, 250));
   
-  mobileSortSelect.addEventListener('change', (e) => {
-    currentSort = e.target.value;
-    handleSearchAndFilter();
-  });
-  
   filterChips.forEach(chip => {
     chip.addEventListener('click', () => {
       filterChips.forEach(c => c.classList.remove('active'));
@@ -728,29 +799,6 @@ function setupEventListeners() {
       handleSearchAndFilter();
     });
   });
-  
-  // Hour filters toggles & actions
-  if (mobileFilterToggleBtn) {
-    mobileFilterToggleBtn.addEventListener('click', () => {
-      const shown = mobileAdvancedFiltersPanel.style.display === 'block';
-      mobileAdvancedFiltersPanel.style.display = shown ? 'none' : 'block';
-      mobileFilterToggleBtn.classList.toggle('active', !shown);
-    });
-  }
-  
-  if (mobileFilterMinHours) {
-    mobileFilterMinHours.addEventListener('input', debounce(handleSearchAndFilter, 250));
-  }
-  if (mobileFilterMaxHours) {
-    mobileFilterMaxHours.addEventListener('input', debounce(handleSearchAndFilter, 250));
-  }
-  if (mobileFilterHoursClearBtn) {
-    mobileFilterHoursClearBtn.addEventListener('click', () => {
-      mobileFilterMinHours.value = '';
-      mobileFilterMaxHours.value = '';
-      handleSearchAndFilter();
-    });
-  }
   
   // Settings
   document.getElementById('mobile-settings-btn').addEventListener('click', openSettingsSheet);
@@ -834,6 +882,61 @@ function setupEventListeners() {
       if (e.key === 'Enter') {
         performRematchSearch();
       }
+    });
+  }
+  
+  // Unified Filter Sheet Event bindings
+  if (mobileFilterHudTrigger) {
+    mobileFilterHudTrigger.addEventListener('click', () => {
+      // Sync inputs with current filter state before showing sheet
+      filterSheetSort.value = currentSort;
+      filterSheetMinHours.value = filterMinHours !== null ? filterMinHours : '';
+      filterSheetMaxHours.value = filterMaxHours !== null ? filterMaxHours : '';
+      filterSheetGenre.value = currentGenre;
+      filterSheetDeveloper.value = currentDeveloper;
+      filterSheetPlatform.value = currentPlatform;
+      
+      mobileFilterSheetOverlay.style.display = 'flex';
+    });
+  }
+  
+  if (closeFilterSheetBtn) {
+    closeFilterSheetBtn.addEventListener('click', () => {
+      mobileFilterSheetOverlay.style.display = 'none';
+    });
+  }
+  
+  if (filterSheetClearBtn) {
+    filterSheetClearBtn.addEventListener('click', () => {
+      filterSheetMinHours.value = '';
+      filterSheetMaxHours.value = '';
+      filterSheetGenre.value = 'all';
+      filterSheetDeveloper.value = 'all';
+      filterSheetPlatform.value = 'all';
+      
+      // Clear state and close
+      filterMinHours = null;
+      filterMaxHours = null;
+      currentGenre = 'all';
+      currentDeveloper = 'all';
+      currentPlatform = 'all';
+      
+      mobileFilterSheetOverlay.style.display = 'none';
+      handleSearchAndFilter();
+    });
+  }
+  
+  if (filterSheetApplyBtn) {
+    filterSheetApplyBtn.addEventListener('click', () => {
+      currentSort = filterSheetSort.value;
+      filterMinHours = filterSheetMinHours.value ? parseFloat(filterSheetMinHours.value) : null;
+      filterMaxHours = filterSheetMaxHours.value ? parseFloat(filterSheetMaxHours.value) : null;
+      currentGenre = filterSheetGenre.value;
+      currentDeveloper = filterSheetDeveloper.value;
+      currentPlatform = filterSheetPlatform.value;
+      
+      mobileFilterSheetOverlay.style.display = 'none';
+      handleSearchAndFilter();
     });
   }
   
@@ -923,6 +1026,7 @@ async function startLibrarySyncMobile(force) {
     games = libraryData.games.map(g => ({ ...g, hltb: g.hltb || null, hltbLoading: false, hltbError: false }));
     
     updateStats();
+    populateFilterDropdowns();
     handleSearchAndFilter();
     
     // Kick off HLTB background sync
@@ -953,6 +1057,7 @@ async function processNextQueueItemMobile(isFirstSync) {
       if (mobileSyncToast) mobileSyncToast.style.display = 'none';
       
       updateStats();
+      populateFilterDropdowns();
       handleSearchAndFilter();
     }
     return;
@@ -1009,6 +1114,11 @@ function openGameDetailsSheet(appid) {
   if (!game) return;
   
   rematchActiveAppid = appid;
+  
+  // Explicitly reset the details sheet scroll container to top!
+  const scrollable = document.querySelector('.details-sheet-scrollable');
+  if (scrollable) scrollable.scrollTop = 0;
+  
   document.getElementById('details-game-name').textContent = game.name;
   document.getElementById('details-game-img').src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
   

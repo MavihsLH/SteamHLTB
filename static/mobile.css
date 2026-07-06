@@ -1582,3 +1582,93 @@ body {
   gap: 0.15rem;
 }
 
+/* Unified Filter Sheet Styles */
+.filter-sheet {
+  background: #0b0c10;
+  border-top: 1.5px solid var(--accent-orange);
+}
+
+.filter-sheet-body {
+  padding-bottom: 2rem !important;
+}
+
+.filter-hours-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.filter-hours-inputs input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.75rem;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  outline: none;
+  text-align: center;
+}
+
+.filter-hours-inputs input:focus {
+  border-color: var(--accent-orange);
+}
+
+.range-divider {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.filter-actions-row {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1.5rem;
+}
+
+.filter-sheet-btn {
+  flex: 1;
+  padding: 1rem;
+  border-radius: 10px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: none;
+}
+
+.filter-sheet-btn.primary-btn {
+  background: var(--accent-orange);
+  color: white;
+}
+
+.filter-sheet-btn.secondary-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.filter-sheet-btn:active {
+  opacity: 0.9;
+}
+
+.filter-hud-item {
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--accent-orange-light);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  height: 100%;
+}
+
+.filter-hud-item i {
+  font-size: 1rem;
+}
+
