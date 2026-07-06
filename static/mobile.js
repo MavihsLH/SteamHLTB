@@ -365,6 +365,38 @@ async function performMobileSync(force, onProgressCallback) {
   }
   
   const mergedGames = allGames.map(game => ({ ...game, hltb: existingHltbMap.get(game.appid) || null }));
+  
+  // --- Dataset-first enrichment ---
+  // Attach HLTB times + metadata from the preloaded dataset for every game
+  // that doesn't already have HLTB data (or on force sync).
+  if (preloadedHltbData && Object.keys(preloadedHltbData).length > 0) {
+    let datasetHits = 0;
+    for (const game of mergedGames) {
+      if (game.hltb && !force) continue; // already has data and not force-syncing
+      const cleanedTitle = cleanGameTitleForSearch(game.name);
+      const datasetEntry = cleanedTitle ? preloadedHltbData[cleanedTitle] : null;
+      if (datasetEntry) {
+        game.hltb = {
+          hltbId: datasetEntry.hltbId || '',
+          title: datasetEntry.title || game.name,
+          gameplayMain: datasetEntry.gameplayMain || 0,
+          gameplayMainExtra: datasetEntry.gameplayMainExtra || 0,
+          gameplayCompletionist: datasetEntry.gameplayCompletionist || 0,
+          imageUrl: datasetEntry.imageUrl || '',
+          notFound: false,
+          genres: datasetEntry.genres || '',
+          developers: datasetEntry.developers || '',
+          publishers: datasetEntry.publishers || '',
+          platforms: datasetEntry.platforms || '',
+          releaseYear: datasetEntry.releaseYear || null,
+          source: 'dataset'
+        };
+        datasetHits++;
+      }
+    }
+    console.log(`Dataset-first enrichment: ${datasetHits}/${mergedGames.length} games matched from preloaded dataset.`);
+  }
+  
   const libraryData = { games: mergedGames, lastSync: Date.now() };
   await saveMobileLibrary(libraryData);
   return libraryData;
@@ -1069,8 +1101,23 @@ async function processNextQueueItemMobile(isFirstSync) {
   
   try {
     let hltbData = null;
-    if (cleanedTitle && preloadedHltbData && preloadedHltbData[cleanedTitle]) {
-      hltbData = preloadedHltbData[cleanedTitle];
+    const datasetEntry = (cleanedTitle && preloadedHltbData) ? preloadedHltbData[cleanedTitle] : null;
+    if (datasetEntry) {
+      hltbData = {
+        hltbId: datasetEntry.hltbId || '',
+        title: datasetEntry.title || game.name,
+        gameplayMain: datasetEntry.gameplayMain || 0,
+        gameplayMainExtra: datasetEntry.gameplayMainExtra || 0,
+        gameplayCompletionist: datasetEntry.gameplayCompletionist || 0,
+        imageUrl: datasetEntry.imageUrl || '',
+        notFound: false,
+        genres: datasetEntry.genres || '',
+        developers: datasetEntry.developers || '',
+        publishers: datasetEntry.publishers || '',
+        platforms: datasetEntry.platforms || '',
+        releaseYear: datasetEntry.releaseYear || null,
+        source: 'dataset'
+      };
     } else {
       hltbData = await fetchHltbData(game);
     }
@@ -1192,26 +1239,46 @@ function openGameDetailsSheet(appid) {
     } else {
       metaSection.style.display = 'none';
       
-      // On-demand fetch fallback from Steam Store API for games missing metadata
+      // On-demand metadata: check preloaded dataset FIRST, then Steam API as fallback
       if (game.hltb && !game.hltb.notFound) {
-        fetchSteamStoreMetadata(game.appid).then(async (meta) => {
-          if (meta && rematchActiveAppid === appid) {
-            game.hltb.developers = meta.developers;
-            game.hltb.publishers = meta.publishers;
-            game.hltb.genres = meta.genres;
-            game.hltb.platforms = meta.platforms;
-            game.hltb.releaseYear = meta.releaseYear;
-            
-            await saveMobileLibrary({ games: games, lastSync: Date.now() });
-            
-            document.getElementById('details-meta-genres').textContent = meta.genres || 'Unknown';
-            document.getElementById('details-meta-developer').textContent = meta.developers || 'Unknown';
-            document.getElementById('details-meta-release').textContent = meta.releaseYear || 'Unknown';
-            document.getElementById('details-meta-platforms').textContent = meta.platforms || 'Unknown';
-            metaSection.style.display = 'flex';
-          }
-        });
-      }
+        const cleanedTitle = cleanGameTitleForSearch(game.name);
+        const datasetEntry = (cleanedTitle && preloadedHltbData) ? preloadedHltbData[cleanedTitle] : null;
+        
+        if (datasetEntry && (datasetEntry.genres || datasetEntry.developers)) {
+          // Use dataset metadata directly — no API call needed
+          game.hltb.genres = datasetEntry.genres || '';
+          game.hltb.developers = datasetEntry.developers || '';
+          game.hltb.publishers = datasetEntry.publishers || '';
+          game.hltb.platforms = datasetEntry.platforms || '';
+          game.hltb.releaseYear = datasetEntry.releaseYear || null;
+          
+          saveMobileLibrary({ games: games, lastSync: Date.now() });
+          
+          document.getElementById('details-meta-genres').textContent = datasetEntry.genres || 'Unknown';
+          document.getElementById('details-meta-developer').textContent = datasetEntry.developers || 'Unknown';
+          document.getElementById('details-meta-release').textContent = datasetEntry.releaseYear || 'Unknown';
+          document.getElementById('details-meta-platforms').textContent = datasetEntry.platforms || 'Unknown';
+          metaSection.style.display = 'flex';
+        } else {
+          // Fallback: hit Steam Store API (only for games not in dataset)
+          fetchSteamStoreMetadata(game.appid).then(async (meta) => {
+            if (meta && rematchActiveAppid === appid) {
+              game.hltb.developers = meta.developers;
+              game.hltb.publishers = meta.publishers;
+              game.hltb.genres = meta.genres;
+              game.hltb.platforms = meta.platforms;
+              game.hltb.releaseYear = meta.releaseYear;
+              
+              await saveMobileLibrary({ games: games, lastSync: Date.now() });
+              
+              document.getElementById('details-meta-genres').textContent = meta.genres || 'Unknown';
+              document.getElementById('details-meta-developer').textContent = meta.developers || 'Unknown';
+              document.getElementById('details-meta-release').textContent = meta.releaseYear || 'Unknown';
+              document.getElementById('details-meta-platforms').textContent = meta.platforms || 'Unknown';
+              metaSection.style.display = 'flex';
+            }
+          });
+        }
     }
   }
   
@@ -1297,14 +1364,25 @@ async function confirmRematchLink(hltbId, title, mainHrs, imgName) {
   
   games[gameIdx].hltb = updatedHltb;
   
-  // Fetch metadata details immediately from Steam AppDetails
-  const meta = await fetchSteamStoreMetadata(appid);
-  if (meta) {
-    games[gameIdx].hltb.developers = meta.developers;
-    games[gameIdx].hltb.publishers = meta.publishers;
-    games[gameIdx].hltb.genres = meta.genres;
-    games[gameIdx].hltb.platforms = meta.platforms;
-    games[gameIdx].hltb.releaseYear = meta.releaseYear;
+  // Fetch metadata: check preloaded dataset first, then Steam API as fallback
+  const rematchCleanedTitle = cleanGameTitleForSearch(games[gameIdx].name);
+  const rematchDatasetEntry = (rematchCleanedTitle && preloadedHltbData) ? preloadedHltbData[rematchCleanedTitle] : null;
+  
+  if (rematchDatasetEntry && (rematchDatasetEntry.genres || rematchDatasetEntry.developers)) {
+    games[gameIdx].hltb.genres = rematchDatasetEntry.genres || '';
+    games[gameIdx].hltb.developers = rematchDatasetEntry.developers || '';
+    games[gameIdx].hltb.publishers = rematchDatasetEntry.publishers || '';
+    games[gameIdx].hltb.platforms = rematchDatasetEntry.platforms || '';
+    games[gameIdx].hltb.releaseYear = rematchDatasetEntry.releaseYear || null;
+  } else {
+    const meta = await fetchSteamStoreMetadata(appid);
+    if (meta) {
+      games[gameIdx].hltb.developers = meta.developers;
+      games[gameIdx].hltb.publishers = meta.publishers;
+      games[gameIdx].hltb.genres = meta.genres;
+      games[gameIdx].hltb.platforms = meta.platforms;
+      games[gameIdx].hltb.releaseYear = meta.releaseYear;
+    }
   }
   
   // Save to mobile storage
