@@ -11,6 +11,7 @@ const BATCH_SIZE = 40;
 let manuallyCompleted = new Set(); // appids the user has manually marked as beaten
 let manuallyUnbeaten = new Set(); // appids the user has manually marked as NOT beaten
 let rematchActiveAppid = null; // appid currently being manually matched
+let preloadedHltbData = {}; // Enriched preloaded HLTB metadata cache
 
 const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
 
@@ -57,6 +58,7 @@ const rematchSearchInput = document.getElementById('rematch-search-input');
 const rematchSearchBtn = document.getElementById('rematch-search-btn');
 const rematchResultsList = document.getElementById('rematch-results-list');
 const detailsRematchBtn = document.getElementById('details-rematch-btn');
+const detailsRefreshBtn = document.getElementById('details-refresh-btn');
 
 // Modals
 const mobileSettingsOverlay = document.getElementById('mobile-settings-overlay');
@@ -138,6 +140,17 @@ async function saveManualBeatenSets() {
   }
 }
 
+async function loadPreloadedHltb() {
+  try {
+    const res = await fetch('js/preloaded_hltb.json');
+    if (res.ok) {
+      preloadedHltbData = await res.json();
+    }
+  } catch (err) {
+    console.warn('Could not load preloaded HLTB dataset:', err);
+  }
+}
+
 // ============================================================================
 // GAME BEAT STATUS HELPER
 // ============================================================================
@@ -172,6 +185,51 @@ function cleanGameTitleForSearch(title) {
   cleaned = cleaned.replace(/([0-9])([a-z])/g, '$1 $2');
   cleaned = cleaned.replace(/\s+/g, ' ');
   return cleaned.trim();
+}
+
+function extractYear(releaseStr) {
+  if (!releaseStr) return null;
+  const parts = releaseStr.split('-');
+  const lastPart = parts[parts.length - 1].trim();
+  if (lastPart.length === 4 && !isNaN(lastPart)) {
+    return parseInt(lastPart);
+  }
+  if (lastPart.length === 2 && !isNaN(lastPart)) {
+    const val = parseInt(lastPart);
+    return val >= 50 ? 1900 + val : 2000 + val;
+  }
+  const match = releaseStr.match(/\b(19\d\d|20\d\d)\b/);
+  if (match) {
+    return parseInt(match[1]);
+  }
+  return null;
+}
+
+// ============================================================================
+// STEAM STORE DETAILS METADATA ON-DEMAND FETCH
+// ============================================================================
+
+async function fetchSteamStoreMetadata(appid) {
+  if (!isMobileApp) return null;
+  const { CapacitorHttp } = window.Capacitor.Plugins;
+  try {
+    const response = await CapacitorHttp.get({
+      url: `https://store.steampowered.com/api/appdetails?appids=${appid}`
+    });
+    if (response.status === 200 && response.data && response.data[appid] && response.data[appid].success) {
+      const data = response.data[appid].data;
+      return {
+        developers: (data.developers || []).join(', '),
+        publishers: (data.publishers || []).join(', '),
+        genres: (data.genres || []).map(g => g.description).join(', '),
+        platforms: Object.keys(data.platforms || {}).filter(k => data.platforms[k]).map(k => k.toUpperCase()).join(', '),
+        releaseYear: data.release_date ? extractYear(data.release_date.date) : null
+      };
+    }
+  } catch (err) {
+    console.warn('Failed to fetch Steam Store details on-demand:', err);
+  }
+  return null;
 }
 
 // ============================================================================
@@ -337,6 +395,7 @@ async function fetchHltbData(game) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadManualBeatenSets();
+  await loadPreloadedHltb();
   await fetchLibrary();
   setupEventListeners();
   
@@ -731,6 +790,36 @@ function setupEventListeners() {
     });
   }
   
+  if (detailsRefreshBtn) {
+    detailsRefreshBtn.addEventListener('click', async () => {
+      const appid = rematchActiveAppid;
+      if (!appid) return;
+      
+      const gameIdx = games.findIndex(g => g.appid === appid);
+      if (gameIdx === -1) return;
+      
+      detailsRefreshBtn.disabled = true;
+      detailsRefreshBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Refreshing...';
+      
+      try {
+        const game = games[gameIdx];
+        const hltbData = await fetchHltbData(game);
+        games[gameIdx].hltb = hltbData;
+        await saveMobileLibrary({ games: games, lastSync: Date.now() });
+        updateStats();
+        handleSearchAndFilter();
+        openGameDetailsSheet(appid);
+        alert(`Successfully refreshed HLTB data for "${game.name}"!`);
+      } catch (err) {
+        console.error('Failed to force refresh game:', err);
+        alert('Failed to refresh data from HowLongToBeat.');
+      } finally {
+        detailsRefreshBtn.disabled = false;
+        detailsRefreshBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Force Refresh HLTB Data';
+      }
+    });
+  }
+  
   // Rematch Sheet Buttons
   if (closeRematchSheetBtn) {
     closeRematchSheetBtn.addEventListener('click', () => {
@@ -806,7 +895,6 @@ async function saveSettingsMobile(e) {
 // ============================================================================
 
 async function startLibrarySyncMobile(force) {
-  // If first-time sync (no games or last sync 0)
   const isFirstSync = (games.length === 0);
   
   try {
@@ -842,7 +930,6 @@ async function startLibrarySyncMobile(force) {
     if (hltbSyncQueue.length > 0) {
       startHltbSyncMobile(isFirstSync);
     } else {
-      // Completed syncing instantly (all games had cached HLTB data)
       if (mobileFirstSyncOverlay) mobileFirstSyncOverlay.style.display = 'none';
       if (mobileSyncToast) mobileSyncToast.style.display = 'none';
     }
@@ -873,15 +960,21 @@ async function processNextQueueItemMobile(isFirstSync) {
   
   activeSyncWorkers++;
   const game = hltbSyncQueue.shift();
+  const cleanedTitle = cleanGameTitleForSearch(game.name);
   
   try {
-    const hltbData = await fetchHltbData(game);
+    let hltbData = null;
+    if (cleanedTitle && preloadedHltbData && preloadedHltbData[cleanedTitle]) {
+      hltbData = preloadedHltbData[cleanedTitle];
+    } else {
+      hltbData = await fetchHltbData(game);
+    }
+    
     const index = games.findIndex(g => g.appid === game.appid);
     if (index !== -1) {
       games[index].hltb = hltbData;
       await saveMobileLibrary({ games: games, lastSync: Date.now() });
       
-      // Update statistics and cards in REAL-TIME!
       updateStats();
       handleSearchAndFilter();
     }
@@ -893,14 +986,12 @@ async function processNextQueueItemMobile(isFirstSync) {
   const processed = games.filter(g => g.hltb !== null).length;
   const pct = total > 0 ? Math.round((processed / total) * 100) : 100;
   
-  // Update progress bar modal if visible
   if (isFirstSync && mobileFirstSyncOverlay.style.display !== 'none') {
     if (firstSyncStatusText) firstSyncStatusText.textContent = `Matching HLTB times: ${processed}/${total} games`;
     if (firstSyncProgressBar) firstSyncProgressBar.style.width = `${pct}%`;
     if (firstSyncPctText) firstSyncPctText.textContent = `${pct}%`;
   }
   
-  // Update top floating sync toast
   if (mobileSyncHudPctToast) {
     mobileSyncHudPctToast.textContent = `${pct}%`;
   }
@@ -976,6 +1067,42 @@ function openGameDetailsSheet(appid) {
     document.getElementById('details-hltb-main').textContent = '--';
     document.getElementById('details-hltb-extra').textContent = '--';
     document.getElementById('details-hltb-100').textContent = '--';
+  }
+  
+  // Rich Metadata Panel
+  const metaSection = document.getElementById('details-metadata-section');
+  if (metaSection) {
+    const hasMeta = game.hltb && !game.hltb.notFound && (game.hltb.genres || game.hltb.developers || game.hltb.releaseYear || game.hltb.platforms);
+    if (hasMeta) {
+      document.getElementById('details-meta-genres').textContent = game.hltb.genres || 'Unknown';
+      document.getElementById('details-meta-developer').textContent = game.hltb.developers || 'Unknown';
+      document.getElementById('details-meta-release').textContent = game.hltb.releaseYear || 'Unknown';
+      document.getElementById('details-meta-platforms').textContent = game.hltb.platforms || 'Unknown';
+      metaSection.style.display = 'flex';
+    } else {
+      metaSection.style.display = 'none';
+      
+      // On-demand fetch fallback from Steam Store API for games missing metadata
+      if (game.hltb && !game.hltb.notFound) {
+        fetchSteamStoreMetadata(game.appid).then(async (meta) => {
+          if (meta && rematchActiveAppid === appid) {
+            game.hltb.developers = meta.developers;
+            game.hltb.publishers = meta.publishers;
+            game.hltb.genres = meta.genres;
+            game.hltb.platforms = meta.platforms;
+            game.hltb.releaseYear = meta.releaseYear;
+            
+            await saveMobileLibrary({ games: games, lastSync: Date.now() });
+            
+            document.getElementById('details-meta-genres').textContent = meta.genres || 'Unknown';
+            document.getElementById('details-meta-developer').textContent = meta.developers || 'Unknown';
+            document.getElementById('details-meta-release').textContent = meta.releaseYear || 'Unknown';
+            document.getElementById('details-meta-platforms').textContent = meta.platforms || 'Unknown';
+            metaSection.style.display = 'flex';
+          }
+        });
+      }
+    }
   }
   
   document.getElementById('details-steam-link').href = `https://store.steampowered.com/app/${game.appid}`;
@@ -1059,6 +1186,16 @@ async function confirmRematchLink(hltbId, title, mainHrs, imgName) {
   };
   
   games[gameIdx].hltb = updatedHltb;
+  
+  // Fetch metadata details immediately from Steam AppDetails
+  const meta = await fetchSteamStoreMetadata(appid);
+  if (meta) {
+    games[gameIdx].hltb.developers = meta.developers;
+    games[gameIdx].hltb.publishers = meta.publishers;
+    games[gameIdx].hltb.genres = meta.genres;
+    games[gameIdx].hltb.platforms = meta.platforms;
+    games[gameIdx].hltb.releaseYear = meta.releaseYear;
+  }
   
   // Save to mobile storage
   await saveMobileLibrary({ games: games, lastSync: Date.now() });
