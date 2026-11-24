@@ -10,25 +10,18 @@
 `(⌐■_■)` *Know how long your library takes to beat — including Steam Family Sharing — before you pick what to play next.*
 
 <p>
-  <a href="#-live-demos--features"><kbd>(☆ω☆) Features &amp; Demos</kbd></a>&nbsp;&nbsp;
+  <a href="#-live-demos--core-functionalities"><kbd>(☆ω☆) Features &amp; Demos</kbd></a>&nbsp;&nbsp;
+  <a href="#3-themes--sound-design-ﾉヮﾉﾟ"><kbd>(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ 4 Themes</kbd></a>&nbsp;&nbsp;
   <a href="#-how-it-works"><kbd>(╭ರ_•́) Architecture</kbd></a>&nbsp;&nbsp;
-  <a href="#-installation--setup"><kbd>(ง •̀_•́)ง Quick Start</kbd></a>&nbsp;&nbsp;
-  <a href="#-themes--sound-design"><kbd>(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ 4 Themes</kbd></a>
+  <a href="#-installation--setup"><kbd>(ง •̀_•́)ง Quick Start</kbd></a>
 </p>
 
 </div>
 
 ---
 
-> [!NOTE]
-> **Adaptive README Preview `( ﾟヮﾟ)`** — The hero screenshot below automatically switches between **Wii Ceramic** (GitHub Light Mode) and **Noir Editorial** (GitHub Dark Mode) using `<picture>` `prefers-color-scheme` media queries.
-
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-dark-obsidian.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-light-ceramic.png">
-    <img src="docs/media/hero-light-ceramic.png" alt="SteamHLTB Dashboard Overview" width="100%">
-  </picture>
+  <img src="docs/media/hero-light-ceramic.png" alt="SteamHLTB Dashboard Overview (Wii Ceramic)" width="100%">
 </p>
 
 ---
@@ -88,7 +81,28 @@ Turn raw playtime numbers into actionable backlog decisions:
 
 ---
 
-### 3. Keyboard Shortcuts & Mobile Companion `(づ｡◕‿‿◕｡)づ`
+### 3. Themes & Sound Design `(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧`
+
+By default, SteamHLTB runs in **Wii Ceramic** (Light) and **Noir Editorial** (Dark). Inside **Settings**, you can mix and match **any Light skin with any Dark skin** for the header toggle and toggle **Wii U–inspired Web Audio button & hover chimes** tailored to each theme's mood.
+
+<p align="center">
+  <img src="docs/media/demo-themes-switcher.gif" alt="Demo: Switching and Mixing All 4 Themes in Settings" width="100%">
+</p>
+
+<details>
+<summary><code>(☆ω☆)</code> <strong>Gallery:</strong> Preview All 4 Built-In Skins</summary>
+<br>
+
+| Light Mode Skins | Dark Mode Skins |
+| :---: | :---: |
+| **Wii Ceramic (Default)**<br><img src="docs/media/hero-light-ceramic.png" alt="Wii Ceramic Theme" width="480"> | **Noir Editorial (Default)**<br><img src="docs/media/hero-dark-obsidian.png" alt="Noir Editorial Theme" width="480"> |
+| **Crystal Vista (Frutiger Aero)**<br><img src="docs/media/theme-crystal-vista.png" alt="Crystal Vista Frutiger Aero Theme" width="480"> | **Cyber Chrome (Y2K Hardware)**<br><img src="docs/media/theme-cyber-chrome.png" alt="Cyber Chrome Y2K Theme" width="480"> |
+
+</details>
+
+---
+
+### 4. Keyboard Shortcuts & Mobile Companion `(づ｡◕‿‿◕｡)づ`
 
 | Shortcut / Input | Action |
 | :--- | :--- |
@@ -186,27 +200,6 @@ docker-compose up -d
 ```
 
 Open **`http://localhost:3000`** in your browser `(b ᵔ▽ᵔ)b`.
-
----
-
-## `(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧` Themes & Sound Design
-
-By default, SteamHLTB runs in **Wii Ceramic** (Light) and **Noir Editorial** (Dark). Inside **Settings**, you can mix and match **any Light skin with any Dark skin** for the header toggle and toggle **Wii U–inspired Web Audio button & hover chimes** tailored to each theme's mood.
-
-<p align="center">
-  <img src="docs/media/demo-themes-switcher.gif" alt="Demo: Switching and Mixing All 4 Themes in Settings" width="100%">
-</p>
-
-<details>
-<summary><code>(☆ω☆)</code> <strong>Gallery:</strong> Preview All 4 Built-In Skins</summary>
-<br>
-
-| Light Mode Skins | Dark Mode Skins |
-| :---: | :---: |
-| **Wii Ceramic (Default)**<br><img src="docs/media/hero-light-ceramic.png" alt="Wii Ceramic Theme" width="480"> | **Noir Editorial (Default)**<br><img src="docs/media/hero-dark-obsidian.png" alt="Noir Editorial Theme" width="480"> |
-| **Crystal Vista (Frutiger Aero)**<br><img src="docs/media/theme-crystal-vista.png" alt="Crystal Vista Frutiger Aero Theme" width="480"> | **Cyber Chrome (Y2K Hardware)**<br><img src="docs/media/theme-cyber-chrome.png" alt="Cyber Chrome Y2K Theme" width="480"> |
-
-</details>
 
 ---
 
