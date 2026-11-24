@@ -1,465 +1,424 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
-
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport"
-    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <script>
+    (function () {
+      var saved = localStorage.getItem('theme');
+      if (saved === 'light') {
+        document.documentElement.removeAttribute('data-theme');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
   <title>SteamHLTB Mobile</title>
-  <!-- Google Fonts: Outfit and DotGothic16 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DotGothic16&family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&display=swap"
-    rel="stylesheet">
-  <!-- FontAwesome for icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="mobile.css">
 </head>
-
 <body>
-
-  <!-- Background Ambient Glows -->
-  <div class="glow-sphere sphere-1"></div>
-  <div class="glow-sphere sphere-2"></div>
-
-  <!-- Mobile App Wrapper -->
   <div class="mobile-wrapper">
-
-    <!-- Top Header -->
+    <!-- Header -->
     <header class="mobile-header">
       <h1 class="header-logo">Steam<span>HLTB</span></h1>
-      <button id="mobile-settings-btn" class="header-action-btn" title="Settings">
-        <i class="fa-solid fa-gear"></i>
-      </button>
+      <div class="header-actions">
+        <button id="mobile-theme-btn" class="header-action-btn" aria-label="Toggle theme" title="Switch Theme">
+          <i class="fa-solid fa-sun icon-to-light"></i>
+          <i class="fa-solid fa-moon icon-to-dark"></i>
+        </button>
+        <button id="mobile-settings-btn" class="header-action-btn" aria-label="Settings" title="Settings">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+      </div>
     </header>
 
-    <!-- Floating Sync HUD Toast -->
-    <div id="mobile-sync-toast" class="sync-toast-floating" style="display: none;">
+    <!-- Floating Sync Status Pill -->
+    <div id="mobile-sync-toast" class="sync-toast-floating" hidden>
       <i class="fa-solid fa-circle-notch fa-spin"></i>
-      <span>Syncing: <span id="mobile-sync-hud-pct-toast">0%</span></span>
-      <button id="mobile-sync-toast-minimize" class="sync-toast-min-btn">✕</button>
+      <span>Syncing <strong id="mobile-sync-hud-pct-toast">0%</strong></span>
+      <button type="button" id="mobile-sync-toast-minimize" class="sync-toast-min-btn" aria-label="Dismiss">&times;</button>
     </div>
 
-    <!-- Scrollable Content Area -->
-    <main class="mobile-content">
+    <!-- Scrollable Main Content -->
+    <main class="mobile-content" id="mobile-content">
+      <!-- Stats Strip -->
+      <section class="stats-carousel" aria-label="Library stats">
+        <article class="stat-card card-backlog">
+          <span class="stat-card-label">Backlog</span>
+          <strong class="stat-card-value" id="stat-backlog-count">0</strong>
+          <span class="stat-card-meta" id="stat-backlog-hours">0h played</span>
+        </article>
 
-      <!-- Stats Grid/Carousel -->
-      <section class="stats-carousel">
-        <div class="stat-card card-backlog">
-          <div class="stat-card-header">
-            <span class="stat-card-label">MY BACKLOG</span>
-            <i class="fa-solid fa-gamepad stat-card-icon"></i>
-          </div>
-          <div class="stat-card-value" id="stat-backlog-count">0 <span class="stat-card-sub">Games</span></div>
-          <div class="stat-card-meta" id="stat-backlog-hours">0h Total</div>
-        </div>
+        <article class="stat-card card-completed">
+          <span class="stat-card-label">Completed</span>
+          <strong class="stat-card-value" id="stat-completed-count">0</strong>
+          <span class="stat-card-meta" id="stat-completed-hours">0h beaten</span>
+        </article>
 
-        <div class="stat-card card-completed">
-          <div class="stat-card-header">
-            <span class="stat-card-label">COMPLETED</span>
-            <i class="fa-solid fa-circle-check stat-card-icon"></i>
-          </div>
-          <div class="stat-card-value" id="stat-completed-count">0 <span class="stat-card-sub">Games</span></div>
-          <div class="stat-card-meta" id="stat-completed-hours">0h</div>
-        </div>
-
-        <div class="stat-card card-next-up">
-          <div class="stat-card-header">
-            <span class="stat-card-label">NEXT UP</span>
-            <i class="fa-solid fa-skull-crossbones stat-card-icon"></i>
-          </div>
-          <div class="stat-card-value next-up-title" id="stat-next-up-name">None</div>
-          <div class="stat-card-meta" id="stat-next-up-time">0h</div>
-        </div>
+        <article class="stat-card card-next-up" id="stat-next-up-card">
+          <span class="stat-card-label">Shortest Up Next</span>
+          <strong class="stat-card-value next-up-title" id="stat-next-up-name">None</strong>
+          <span class="stat-card-meta" id="stat-next-up-time">—</span>
+        </article>
       </section>
 
-      <!-- Roll The Dice CTA Banner -->
+      <!-- What to Play Next Banner -->
       <section class="dice-cta-section">
-        <button id="mobile-dice-btn" class="dice-cta-btn">
-          <span>Roll The Dice</span>
-          <div class="dice-icon-container">
-            <i class="fa-solid fa-dice"></i>
+        <button type="button" id="mobile-dice-btn" class="dice-cta-btn">
+          <div class="dice-cta-copy">
+            <strong>Pick Something to Play</strong>
+            <span>Weighted toward shorter unfinished games</span>
           </div>
+          <span class="dice-icon-pill"><i class="fa-solid fa-dice"></i></span>
         </button>
       </section>
 
-      <!-- Search & Filters Container -->
+      <!-- Search & Filter Chips -->
       <section class="search-filter-section">
         <div class="mobile-search-bar">
-          <i class="fa-solid fa-magnifying-glass search-icon"></i>
-          <input type="text" id="mobile-search-input" placeholder="Search backlog...">
-          <button id="mobile-sync-btn" class="mobile-sync-trigger-btn" title="Sync Library">
+          <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+          <input type="text" id="mobile-search-input" placeholder="Search library..." autocomplete="off">
+          <button type="button" id="mobile-sync-btn" class="mobile-sync-trigger-btn" aria-label="Sync library" title="Sync Library">
             <i class="fa-solid fa-arrows-rotate"></i>
           </button>
         </div>
 
-        <!-- Filter Chips Scrolling Horizontal -->
-        <div class="filter-chips-container">
-          <button class="filter-chip active" data-filter="all">All</button>
-          <button class="filter-chip" data-filter="owned">Owned</button>
-          <button class="filter-chip" data-filter="shared">Borrowed</button>
-          <button class="filter-chip" data-filter="played">Played</button>
-          <button class="filter-chip" data-filter="unplayed">Unplayed</button>
-          <button class="filter-chip" data-filter="completed">Completed</button>
+        <div class="filter-chips-container" role="tablist">
+          <button type="button" class="filter-chip active" data-filter="all">All</button>
+          <button type="button" class="filter-chip" data-filter="owned">Owned</button>
+          <button type="button" class="filter-chip" data-filter="shared">Borrowed</button>
+          <button type="button" class="filter-chip" data-filter="played">In Progress</button>
+          <button type="button" class="filter-chip" data-filter="unplayed">Unplayed</button>
+          <button type="button" class="filter-chip" data-filter="completed">Completed</button>
         </div>
       </section>
 
-      <!-- Games List/Grid Sections -->
-
-      <!-- 1. Games in Progress (Beating) -->
-      <section class="section-games-progress" id="progress-games-section" style="display: none;">
-        <h3 class="mobile-section-title">GAMES IN PROGRESS <span class="arrow-indicator">↗</span></h3>
-        <div class="mobile-grid-large" id="progress-games-grid">
-          <!-- Inject large interactive cards here -->
-        </div>
+      <!-- In Progress Section -->
+      <section class="section-games-progress" id="progress-games-section" hidden>
+        <h2 class="mobile-section-title">In Progress</h2>
+        <div class="mobile-grid-large" id="progress-games-grid"></div>
       </section>
 
-      <!-- 2. Backlog / All Games -->
+      <!-- Backlog Grid -->
       <section class="section-games-all">
-        <h3 class="mobile-section-title" id="all-games-header">YOUR BACKLOG</h3>
-
-        <!-- Empty / Setup States -->
-        <div id="mobile-setup-view" class="mobile-status-card" style="display: none;">
-          <i class="fa-solid fa-triangle-exclamation status-card-icon-large"></i>
-          <h2>Configuration Required</h2>
-          <p>Please enter your Steam API Key and numeric SteamID to import your library database.</p>
-          <button class="mobile-action-btn" id="mobile-setup-trigger-btn">
-            <i class="fa-solid fa-gear"></i> Configure Settings
-          </button>
+        <div class="section-title-row">
+          <h2 class="mobile-section-title" id="all-games-header">Your Library</h2>
+          <span class="section-count" id="mobile-visible-count"></span>
         </div>
 
-        <div id="mobile-empty-view" class="mobile-status-card" style="display: none;">
-          <i class="fa-solid fa-cloud-arrow-down status-card-icon-large"></i>
+        <div id="mobile-setup-view" class="mobile-status-card" hidden>
+          <div class="status-icon-wrap"><i class="fa-solid fa-sliders"></i></div>
+          <h2>Connect Steam</h2>
+          <p>Enter your Steam Web API Key and Steam ID in Settings to import your library.</p>
+          <button type="button" class="mobile-action-btn" id="mobile-setup-trigger-btn">Open Settings</button>
+        </div>
+
+        <div id="mobile-empty-view" class="mobile-status-card" hidden>
+          <div class="status-icon-wrap"><i class="fa-solid fa-cloud-arrow-down"></i></div>
           <h2>Library Not Synced</h2>
-          <p>Your game library cache is empty. Pull your games from Steam now.</p>
-          <button class="mobile-action-btn" id="mobile-empty-sync-btn">
-            <i class="fa-solid fa-arrows-rotate"></i> Sync Library
-          </button>
+          <p>Your local cache is empty. Pull your Steam library and HLTB durations now.</p>
+          <button type="button" class="mobile-action-btn" id="mobile-empty-sync-btn">Sync Library</button>
         </div>
 
-        <div id="mobile-no-matches-view" class="mobile-status-card" style="display: none;">
-          <i class="fa-solid fa-folder-open status-card-icon-large"></i>
-          <h2>No matches found</h2>
-          <p>Try modifying your search text query or chips selection filters.</p>
+        <div id="mobile-no-matches-view" class="mobile-status-card" hidden>
+          <div class="status-icon-wrap"><i class="fa-regular fa-folder-open"></i></div>
+          <h2>No Matching Titles</h2>
+          <p>Try adjusting your search or clearing active filters.</p>
         </div>
 
-        <div class="mobile-grid-small" id="mobile-games-grid">
-          <!-- Grid items dynamically injected -->
-        </div>
+        <div class="mobile-grid-small" id="mobile-games-grid"></div>
       </section>
-
     </main>
 
-    <!-- Floating Filter Bottom Bar (Unified HUD) -->
-    <footer class="mobile-nav-hud" id="mobile-filter-hud-trigger">
-      <div class="hud-item filter-hud-item">
-        <i class="fa-solid fa-sliders"></i>
-        <span>Filter & Sort</span>
-      </div>
-    </footer>
-
+    <!-- Bottom Filter Pill -->
+    <button type="button" class="mobile-nav-hud" id="mobile-filter-hud-trigger">
+      <i class="fa-solid fa-sliders"></i>
+      <span>Filter &amp; Sort</span>
+      <span id="mobile-filter-badge" class="hud-count-badge" hidden>0</span>
+    </button>
   </div>
 
-  <!-- Settings Modal (Slide-up Bottom Sheet) -->
-  <div id="mobile-settings-overlay" class="bottom-sheet-overlay" style="display: none;">
+  <!-- Settings Bottom Sheet -->
+  <div id="mobile-settings-overlay" class="bottom-sheet-overlay" hidden>
     <div class="bottom-sheet-content">
       <div class="sheet-handle"></div>
       <div class="sheet-header">
-        <h2><i class="fa-solid fa-gear"></i> App Configuration</h2>
-        <button id="close-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+        <h2>Settings</h2>
+        <button type="button" id="close-sheet-btn" class="close-sheet-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <form id="mobile-settings-form">
+      <form id="mobile-settings-form" class="sheet-form">
         <div class="sheet-form-group">
-          <label for="mobile-settings-api-key">STEAM API KEY</label>
-          <input type="password" id="mobile-settings-api-key" placeholder="Enter Steam Web API Key">
-          <span class="input-subtitle">Get it from <a href="https://steamcommunity.com/dev/apikey"
-              target="_blank">steamcommunity.com/dev/apikey</a></span>
+          <label for="mobile-settings-api-key">Steam API Key</label>
+          <input type="password" id="mobile-settings-api-key" placeholder="Enter Steam Web API Key" autocomplete="off">
+          <span class="input-subtitle">Get one from <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a></span>
         </div>
         <div class="sheet-form-group">
-          <label for="mobile-settings-steam-id">STEAM USER ID</label>
-          <input type="text" id="mobile-settings-steam-id" placeholder="17-digit numeric ID or Vanity URL">
+          <label for="mobile-settings-steam-id">Steam ID</label>
+          <input type="text" id="mobile-settings-steam-id" placeholder="17-digit SteamID64 or vanity URL" autocomplete="off">
         </div>
         <div class="sheet-form-group">
-          <label for="mobile-settings-family-ids">FAMILY MEMBER STEAM IDS (Optional)</label>
-          <textarea id="mobile-settings-family-ids"
-            placeholder="Enter comma-separated IDs (e.g. 76561198xxx, 76561198yyy)"></textarea>
-          <span class="input-subtitle">Enables shared library backlogs tracking</span>
+          <label for="mobile-settings-family-ids">Family Member IDs (Optional)</label>
+          <textarea id="mobile-settings-family-ids" placeholder="Comma-separated SteamIDs or vanity names"></textarea>
         </div>
-        <button type="submit" class="sheet-save-btn">SAVE SETTINGS</button>
+        <button type="submit" class="sheet-save-btn">Save Settings</button>
       </form>
     </div>
   </div>
 
-  <!-- Game Details Modal (Slide-up Bottom Sheet) -->
-  <div id="mobile-details-overlay" class="bottom-sheet-overlay" style="display: none;">
+  <!-- Game Details Bottom Sheet -->
+  <div id="mobile-details-overlay" class="bottom-sheet-overlay" hidden>
     <div class="bottom-sheet-content details-sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-header">
         <h2 id="details-game-name">Game Details</h2>
-        <button id="close-details-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+        <button type="button" id="close-details-btn" class="close-sheet-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="details-sheet-scrollable">
         <div class="details-artwork-wrapper">
-          <img id="details-game-img" src="" alt="Game cover">
+          <img id="details-game-img" src="" alt="">
           <span class="details-owner-badge" id="details-owner-badge">Owned</span>
         </div>
 
         <div class="details-metrics-row">
           <div class="detail-metric">
-            <span class="metric-label">PLAYTIME</span>
-            <span class="metric-value" id="details-playtime-val">0 hrs</span>
+            <span class="metric-label">Playtime</span>
+            <strong class="metric-value" id="details-playtime-val">0h</strong>
           </div>
           <div class="detail-metric">
-            <span class="metric-label">BEAT STATUS</span>
-            <span class="metric-value" id="details-status-val">-</span>
+            <span class="metric-label">Status</span>
+            <strong class="metric-value" id="details-status-val">—</strong>
           </div>
         </div>
 
-        <button id="details-mark-complete-btn" class="details-mark-btn" style="display: none;">Mark as Beaten</button>
+        <button type="button" id="details-mark-complete-btn" class="details-mark-btn">Mark as Beaten</button>
 
         <div class="details-hltb-section">
-          <h3>HOWLONGTOBEAT TIMES</h3>
+          <h3>HowLongToBeat</h3>
           <div class="details-hltb-grid">
             <div class="mobile-hltb-item">
-              <span class="hltb-label">Main Story</span>
-              <span class="hltb-time-val" id="details-hltb-main">--h</span>
+              <span class="hltb-label">Main</span>
+              <strong class="hltb-time-val" id="details-hltb-main">—</strong>
             </div>
             <div class="mobile-hltb-item">
-              <span class="hltb-label">Main + Extra</span>
-              <span class="hltb-time-val" id="details-hltb-extra">--h</span>
+              <span class="hltb-label">Extra</span>
+              <strong class="hltb-time-val" id="details-hltb-extra">—</strong>
             </div>
             <div class="mobile-hltb-item">
-              <span class="hltb-label">100% Complete</span>
-              <span class="hltb-time-val" id="details-hltb-100">--h</span>
+              <span class="hltb-label">100%</span>
+              <strong class="hltb-time-val" id="details-hltb-100">—</strong>
             </div>
           </div>
         </div>
 
-        <!-- Game Metadata Info -->
-        <div class="details-metadata-section" id="details-metadata-section" style="display: none;">
-          <div class="metadata-grid">
-            <div class="metadata-item">
-              <span class="meta-label">GENRES</span>
-              <span class="meta-value" id="details-meta-genres">--</span>
-            </div>
-            <div class="metadata-item">
-              <span class="meta-label">DEVELOPER</span>
-              <span class="meta-value" id="details-meta-developer">--</span>
-            </div>
-            <div class="metadata-item flex-row-item">
-              <div class="sub-meta">
-                <span class="meta-label">RELEASE YEAR</span>
-                <span class="meta-value" id="details-meta-release">--</span>
-              </div>
-              <div class="sub-meta">
-                <span class="meta-label">PLATFORMS</span>
-                <span class="meta-value" id="details-meta-platforms">--</span>
-              </div>
-            </div>
+        <div class="details-metadata-section" id="details-metadata-section" hidden>
+          <div class="metadata-row">
+            <span class="meta-label">Genres</span>
+            <span class="meta-value" id="details-meta-genres">—</span>
+          </div>
+          <div class="metadata-row">
+            <span class="meta-label">Developer</span>
+            <span class="meta-value" id="details-meta-developer">—</span>
+          </div>
+          <div class="metadata-row">
+            <span class="meta-label">Released</span>
+            <span class="meta-value" id="details-meta-release">—</span>
+          </div>
+          <div class="metadata-row">
+            <span class="meta-label">Platforms</span>
+            <span class="meta-value" id="details-meta-platforms">—</span>
           </div>
         </div>
 
         <div class="details-links-section">
-          <a id="details-steam-link" href="#" class="details-link-btn steam-link" target="_blank">
-            <i class="fa-brands fa-steam"></i> View on Steam Store
-          </a>
-          <a id="details-hltb-link" href="#" class="details-link-btn hltb-link" target="_blank">
-            <i class="fa-solid fa-magnifying-glass"></i> View on HowLongToBeat
-          </a>
-          <button id="details-rematch-btn" class="details-link-btn rematch-link">
-            <i class="fa-solid fa-arrows-spin"></i> Re-match / Correct HLTB
-          </button>
-          <button id="details-refresh-btn" class="details-link-btn refresh-link">
-            <i class="fa-solid fa-arrows-rotate"></i> Force Refresh HLTB Data
-          </button>
+          <div class="details-links-pair">
+            <a id="details-steam-link" href="#" class="details-link-btn" target="_blank" rel="noopener noreferrer">
+              <i class="fa-brands fa-steam"></i> Steam
+            </a>
+            <a id="details-hltb-link" href="#" class="details-link-btn primary-link" target="_blank" rel="noopener noreferrer">
+              <i class="fa-solid fa-arrow-up-right-from-square"></i> HLTB
+            </a>
+          </div>
+          <div class="details-links-pair">
+            <button type="button" id="details-rematch-btn" class="details-link-btn">
+              <i class="fa-solid fa-magnifying-glass"></i> Re-match
+            </button>
+            <button type="button" id="details-refresh-btn" class="details-link-btn">
+              <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- HLTB Rematch Overlay (Bottom Sheet) -->
-  <div id="mobile-rematch-overlay" class="bottom-sheet-overlay" style="display: none; z-index: 120;">
+  <!-- Rematch Bottom Sheet -->
+  <div id="mobile-rematch-overlay" class="bottom-sheet-overlay" style="z-index: 120;" hidden>
     <div class="bottom-sheet-content rematch-sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-header">
-        <h2><i class="fa-solid fa-arrows-spin"></i> HLTB Re-match</h2>
-        <button id="close-rematch-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+        <h2>Re-match HLTB</h2>
+        <button type="button" id="close-rematch-sheet-btn" class="close-sheet-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="rematch-body">
-        <p class="rematch-desc">Search HowLongToBeat to find correct gameplay times:</p>
         <div class="rematch-search-row">
           <input type="text" id="rematch-search-input" placeholder="Search game title...">
-          <button id="rematch-search-btn" class="rematch-search-action-btn"><i
-              class="fa-solid fa-magnifying-glass"></i></button>
+          <button type="button" id="rematch-search-btn" class="rematch-search-action-btn" aria-label="Search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </button>
         </div>
-
-        <!-- Results Container -->
-        <div class="rematch-results-scrollable" id="rematch-results-list">
-          <!-- Dynamically populated with search results -->
-        </div>
+        <div class="rematch-results-scrollable" id="rematch-results-list"></div>
       </div>
     </div>
   </div>
 
-  <!-- Double Sync Choice Prompt Dialog -->
-  <div id="mobile-sync-modal" class="bottom-sheet-overlay sync-modal-overlay" style="display: none;">
+  <!-- Sync Choice Bottom Sheet -->
+  <div id="mobile-sync-modal" class="bottom-sheet-overlay sync-modal-overlay" hidden>
     <div class="bottom-sheet-content sync-choice-sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-header">
-        <h2>Sync Game Library</h2>
-        <button id="close-sync-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+        <h2>Sync Library</h2>
+        <button type="button" id="close-sync-sheet-btn" class="close-sheet-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <p class="sync-desc-text">Update your library data with Steam. Choose the sync type:</p>
+      <p class="sync-desc-text">Choose how to update your Steam library and HLTB durations.</p>
       <div class="sync-choices-container">
-        <button class="mobile-sync-choice-btn" id="mobile-sync-quick-btn">
+        <button type="button" class="mobile-sync-choice-btn" id="mobile-sync-quick-btn">
           <i class="fa-solid fa-bolt choice-icon"></i>
           <div class="choice-info">
             <span class="choice-title">Quick Incremental Sync</span>
-            <span class="choice-desc">Import new purchases and update recent play times (Fast)</span>
+            <span class="choice-desc">Import new purchases and update playtimes while keeping cached HLTB matches.</span>
           </div>
         </button>
-
-        <button class="mobile-sync-choice-btn warning" id="mobile-sync-force-btn">
-          <i class="fa-solid fa-arrows-spin choice-icon"></i>
+        <button type="button" class="mobile-sync-choice-btn warning" id="mobile-sync-force-btn">
+          <i class="fa-solid fa-rotate choice-icon"></i>
           <div class="choice-info">
             <span class="choice-title">Force Full Re-Sync</span>
-            <span class="choice-desc">Purge all local cache data and re-fetch everything from scratch (Thorough)</span>
+            <span class="choice-desc">Rebuild cache and re-match every title from scratch.</span>
           </div>
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Suggestion Picker Dice Modal -->
-  <div id="mobile-dice-modal" class="bottom-sheet-overlay sync-modal-overlay" style="display: none;">
+  <!-- Dice Recommendation Bottom Sheet -->
+  <div id="mobile-dice-modal" class="bottom-sheet-overlay sync-modal-overlay" hidden>
     <div class="bottom-sheet-content dice-result-sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-header">
-        <h2>🎲 Backlog Recommendation</h2>
-        <button id="close-dice-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+        <h2>Up Next Recommendation</h2>
+        <button type="button" id="close-dice-sheet-btn" class="close-sheet-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="dice-result-body">
-        <p class="dice-intro">We recommend playing this next from your active backlog:</p>
         <div class="suggested-game-cover-container">
-          <img id="dice-game-img" alt="Game Artwork">
-          <div class="suggested-glow-border"></div>
+          <img id="dice-game-img" src="" alt="">
         </div>
-        <h2 id="dice-game-title">Hollow Knight</h2>
+        <h3 id="dice-game-title">—</h3>
         <div class="dice-game-metrics">
           <div class="dice-metric">
-            <span class="lbl">PLAYTIME</span>
-            <span class="val" id="dice-playtime-val">2.5h</span>
+            <span class="lbl">Played</span>
+            <strong class="val" id="dice-playtime-val">0h</strong>
           </div>
           <div class="dice-metric">
-            <span class="lbl">MAIN STORY</span>
-            <span class="val" id="dice-hltb-main-val">27h</span>
+            <span class="lbl">Main Story</span>
+            <strong class="val" id="dice-hltb-main-val">—</strong>
           </div>
         </div>
-        <button id="dice-open-details-btn" class="dice-open-details-btn">OPEN DETAILS SHEET</button>
-        <button id="dice-reroll-btn" class="dice-reroll-btn"><i class="fa-solid fa-dice"></i> ROLL AGAIN</button>
+        <div class="dice-actions">
+          <button type="button" id="dice-open-details-btn" class="sheet-save-btn">View Details</button>
+          <button type="button" id="dice-reroll-btn" class="dice-reroll-btn">Pick Another</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- First-Time Sync Progress Modal -->
-  <div id="mobile-first-sync-overlay" class="bottom-sheet-overlay first-sync-overlay" style="display: none;">
+  <!-- First-Time Sync Progress Sheet -->
+  <div id="mobile-first-sync-overlay" class="bottom-sheet-overlay first-sync-overlay" hidden>
     <div class="bottom-sheet-content first-sync-sheet">
       <div class="sheet-header">
-        <h2><i class="fa-solid fa-circle-notch fa-spin"></i> Initializing Backlog</h2>
+        <h2>Initializing Library</h2>
       </div>
       <div class="first-sync-body">
-        <p class="first-sync-desc">
-          We are importing your library and matching play times with HowLongToBeat database.
-        </p>
-
+        <p class="first-sync-desc">Importing your Steam games and matching HowLongToBeat playtimes.</p>
         <div class="first-sync-progress-container">
           <div class="progress-bar-track">
             <div id="first-sync-progress-bar" class="progress-bar-fill" style="width: 0%;"></div>
           </div>
           <div class="progress-status-row">
-            <span id="first-sync-status-text">Fetching Steam games...</span>
+            <span id="first-sync-status-text">Connecting to Steam...</span>
             <span id="first-sync-pct-text">0%</span>
           </div>
         </div>
-
-        <p class="first-sync-note">Please keep the app open. Larger libraries may take a couple of minutes to finish
-          matching times.</p>
-
-        <button id="first-sync-background-btn" class="first-sync-bg-btn">Use App in Background</button>
+        <button type="button" id="first-sync-background-btn" class="dice-reroll-btn">Continue in Background</button>
       </div>
     </div>
   </div>
 
-  <!-- Unified Filter & Refine Bottom Sheet -->
-  <div id="mobile-filter-sheet-overlay" class="bottom-sheet-overlay" style="display: none; z-index: 105;">
+  <!-- Filter & Sort Bottom Sheet -->
+  <div id="mobile-filter-sheet-overlay" class="bottom-sheet-overlay" style="z-index: 105;" hidden>
     <div class="bottom-sheet-content filter-sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-header">
-        <h2><i class="fa-solid fa-filter text-orange"></i> Filter & Sort</h2>
-        <button id="close-filter-sheet-btn" class="close-sheet-btn"><i class="fa-solid fa-xmark"></i></button>
+        <h2>Filter &amp; Sort</h2>
+        <button type="button" id="close-filter-sheet-btn" class="close-sheet-btn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="details-sheet-scrollable filter-sheet-body">
-        
-        <!-- Sort Section -->
         <div class="sheet-form-group">
-          <label for="filter-sheet-sort">SORT ORDER</label>
+          <label for="filter-sheet-sort">Sort Order</label>
           <select id="filter-sheet-sort">
-            <option value="playtime_desc">Playtime (High to Low)</option>
-            <option value="playtime_asc">Playtime (Low to High)</option>
-            <option value="name_asc">Name (A to Z)</option>
-            <option value="name_desc">Name (Z to A)</option>
-            <option value="hltb_main_asc">HLTB Story (Shortest First)</option>
-            <option value="hltb_main_desc">HLTB Story (Longest First)</option>
+            <option value="playtime_desc">Playtime: High to Low</option>
+            <option value="playtime_asc">Playtime: Low to High</option>
+            <option value="name_asc">Title: A to Z</option>
+            <option value="name_desc">Title: Z to A</option>
+            <option value="hltb_main_asc">Main Story: Shortest</option>
+            <option value="hltb_main_desc">Main Story: Longest</option>
           </select>
         </div>
 
-        <!-- HLTB Hours Range -->
         <div class="sheet-form-group">
-          <label>GAMEPLAY LENGTH</label>
+          <label>Main Story Length (Hours)</label>
           <div class="filter-hours-inputs">
-            <input type="number" id="filter-sheet-min-hours" placeholder="Min" min="0">
-            <span class="range-divider">to</span>
-            <input type="number" id="filter-sheet-max-hours" placeholder="Max" min="0">
+            <input type="number" id="filter-sheet-min-hours" placeholder="Min" min="0" step="0.5">
+            <span class="range-divider">&ndash;</span>
+            <input type="number" id="filter-sheet-max-hours" placeholder="Max" min="0" step="0.5">
           </div>
         </div>
 
-        <!-- Genre Selection -->
         <div class="sheet-form-group">
-          <label for="filter-sheet-genre">GENRE</label>
+          <label for="filter-sheet-genre">Genre</label>
           <select id="filter-sheet-genre">
             <option value="all">All Genres</option>
           </select>
         </div>
 
-        <!-- Developer Selection -->
         <div class="sheet-form-group">
-          <label for="filter-sheet-developer">DEVELOPER</label>
+          <label for="filter-sheet-developer">Developer</label>
           <select id="filter-sheet-developer">
             <option value="all">All Developers</option>
           </select>
         </div>
 
-        <!-- Platform Selection -->
         <div class="sheet-form-group">
-          <label for="filter-sheet-platform">PLATFORM</label>
+          <label for="filter-sheet-platform">Platform</label>
           <select id="filter-sheet-platform">
             <option value="all">All Platforms</option>
           </select>
         </div>
 
-        <!-- Action Buttons -->
         <div class="filter-actions-row">
-          <button id="filter-sheet-clear-btn" class="filter-sheet-btn secondary-btn">Clear All</button>
-          <button id="filter-sheet-apply-btn" class="filter-sheet-btn primary-btn">Apply</button>
+          <button type="button" id="filter-sheet-clear-btn" class="filter-sheet-btn secondary-btn">Reset</button>
+          <button type="button" id="filter-sheet-apply-btn" class="filter-sheet-btn primary-btn">Apply</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Cordova / Capacitor script injection -->
+  <!-- Toast Container -->
+  <div id="mobile-toast-container" class="mobile-toast-container" aria-live="polite"></div>
+
   <script src="capacitor.js"></script>
   <script src="mobile.js"></script>
 </body>
-
 </html>

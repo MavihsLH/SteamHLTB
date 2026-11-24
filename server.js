@@ -1,456 +1,749 @@
 const express = require('express');
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 const { exec } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable JSON middleware
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-// Request logger middleware
+// Concise request logger for API and HTML pages
 app.use((req, res, next) => {
-  // Only log API requests and primary page requests to keep terminal clean
   if (req.url.startsWith('/api') || req.url === '/' || req.url.endsWith('.html')) {
     console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
   }
   next();
 });
 
-// Detect if running under Electron
+// Environment detection (Electron / pkg / Node)
 const isElectron = typeof process.versions.electron !== 'undefined';
 let isElectronPackaged = false;
 if (isElectron) {
   isElectronPackaged = require('electron').app.isPackaged;
 }
-
-// Paths for configuration and caching
 const isPackaged = typeof process.pkg !== 'undefined';
 const baseDir = (isPackaged || isElectronPackaged) ? path.dirname(process.execPath) : __dirname;
 const CONFIG_PATH = path.join(baseDir, 'config.json');
 const DB_PATH = path.join(baseDir, 'db.json');
 
-// Load preloaded HLTB database for optimizing search queries
-let preloadedHltbData = {};
-try {
-  const preloadedPath = path.join(__dirname, 'static', 'js', 'preloaded_hltb.json');
-  if (fs.existsSync(preloadedPath)) {
-    preloadedHltbData = JSON.parse(fs.readFileSync(preloadedPath, 'utf8'));
-    console.log(`[Startup] Loaded ${Object.keys(preloadedHltbData).length} preloaded offline HLTB game profiles.`);
+// ============================================================================
+// TITLE NORMALIZATION & SIMILARITY MATCHING
+// ============================================================================
+
+function cleanGameTitleForSearch(title) {
+  if (!title) return '';
+  let cleaned = String(title).toLowerCase().trim();
+
+  // Strip non-ASCII only when mixed with ASCII (e.g. bilingual Steam titles)
+  const hasAscii = /[a-z0-9]/.test(cleaned);
+  const hasNonAscii = /[^\x00-\x7F]/.test(cleaned);
+  if (hasAscii && hasNonAscii) {
+    cleaned = cleaned.replace(/[^\x00-\x7F]/g, ' ');
   }
-} catch (err) {
-  console.warn('[Startup] Warning: Could not load preloaded HLTB database:', err);
+
+  // Strip parenthetical / bracketed suffixes BEFORE stripping punctuation
+  cleaned = cleaned.replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ');
+
+  // Replace trademark and punctuation symbols with space
+  cleaned = cleaned.replace(/[™®©\-–—/\\_.,:!?'"~`@#$%^&*(){}\[\]<>+=|]/g, ' ');
+
+  // Insert space between adjacent letters and digits (e.g. portal2 -> portal 2)
+  cleaned = cleaned.replace(/([a-z])([0-9])/g, '$1 $2');
+  cleaned = cleaned.replace(/([0-9])([a-z])/g, '$1 $2');
+
+  return cleaned.replace(/\s+/g, ' ').trim();
 }
 
-// --- Self-Contained HowLongToBeat Scraper Logic ---
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const EDITION_SUFFIX_RE = /\b(Game of the Year(\s*Edition)?|GOTY(\s*Edition)?|Deluxe(\s*Edition)?|Definitive(\s*Edition)?|Remastered|Enhanced(\s*Edition)?|Special(\s*Edition)?|Collector'?s(\s*Edition)?|Director'?s\s*Cut|Anniversary(\s*Edition)?|Standard(\s*Edition)?|Complete(\s*Edition)?|Gold(\s*Edition)?|Ultimate(\s*Edition)?|Legendary(\s*Edition)?|Royal(\s*Edition)?|HD\s*Remaster|HD)\b/gi;
 
-let hltbAuthCache = null;
-let hltbAuthTime = 0;
+function generateSearchCandidates(rawTitle) {
+  const candidates = new Set();
+  const title = String(rawTitle || '').trim();
+  if (!title) return [];
 
-// Fetch auth headers/honeypot dynamically from `/api/bleed/init`
-async function getHltbAuth() {
-  const now = Date.now();
-  // Reuse credentials for up to 10 minutes (600,000 ms)
-  if (hltbAuthCache && (now - hltbAuthTime < 600000)) {
-    return hltbAuthCache;
-  }
-  
-  try {
-    console.log("Fetching HowLongToBeat security credentials...");
-    const res = await fetch(`https://howlongtobeat.com/api/bleed/init?t=${now}`, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Referer': 'https://howlongtobeat.com/',
-        'Origin': 'https://howlongtobeat.com'
-      }
-    });
-    if (!res.ok) throw new Error(`Init failed with status ${res.status}`);
-    const data = await res.json();
-    hltbAuthCache = {
-      token: data.token,
-      hpKey: data.hpKey,
-      hpVal: data.hpVal
-    };
-    hltbAuthTime = now;
-    return hltbAuthCache;
-  } catch (err) {
-    console.error("Failed to fetch HLTB auth credentials:", err.message);
-    return null;
-  }
-}
-
-// Scrape HowLongToBeat search API
-async function scrapeHltb(gameName) {
-  let auth = await getHltbAuth();
-  if (!auth) return [];
-  
-  const executeSearch = async (currentAuth) => {
-    const payload = {
-      searchType: "games",
-      searchTerms: gameName.trim().split(' '),
-      searchPage: 1,
-      size: 20,
-      searchOptions: {
-        games: {
-          userId: 0,
-          platform: "",
-          sortCategory: "popular",
-          rangeCategory: "main",
-          rangeTime: { min: 0, max: 0 },
-          gameplay: { perspective: "", flow: "", genre: "", difficulty: "" },
-          rangeYear: { min: "", max: "" },
-          modifier: ""
-        },
-        users: { sortCategory: "postcount" },
-        lists: { sortCategory: "follows" },
-        filter: "",
-        sort: 0,
-        randomizer: 0
-      },
-      useCache: true
-    };
-    
-    if (currentAuth.hpKey) {
-      payload[currentAuth.hpKey] = currentAuth.hpVal;
-    }
-    
-    const response = await fetch("https://howlongtobeat.com/api/bleed", {
-      method: "POST",
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Content-Type': 'application/json',
-        'Origin': 'https://howlongtobeat.com',
-        'Referer': 'https://howlongtobeat.com/',
-        'x-auth-token': currentAuth.token,
-        'x-hp-key': currentAuth.hpKey,
-        'x-hp-val': currentAuth.hpVal
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (response.status === 403) {
-      console.warn("HLTB token expired or rejected. Clearing cache...");
-      hltbAuthCache = null;
-      return null;
-    }
-    
-    if (!response.ok) {
-      throw new Error(`HLTB search POST request failed with status: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data.data || [];
+  const add = (str) => {
+    const t = String(str || '').trim();
+    if (t.length >= 2) candidates.add(t);
   };
-  
-  try {
-    let results = await executeSearch(auth);
-    if (results === null) {
-      auth = await getHltbAuth();
-      if (!auth) return [];
-      results = await executeSearch(auth);
-    }
-    return results || [];
-  } catch (err) {
-    console.error(`Error querying HLTB for "${gameName}":`, err.message);
-    return [];
+
+  candidates.add(title);
+
+  // 1. Remove parentheticals / brackets (e.g. "Persona 5 Royal (2022)")
+  const noParens = title.replace(/\s*\([^)]*\)/g, '').replace(/\s*\[[^\]]*\]/g, '').trim();
+  if (noParens && noParens !== title) add(noParens);
+
+  const base = noParens || title;
+
+  // 2. Strip edition / remaster suffixes
+  const noEdition = base.replace(EDITION_SUFFIX_RE, '').replace(/[\s:\-–—]+$/, '').trim();
+  if (noEdition && noEdition !== base) add(noEdition);
+
+  // 3. Split by slash for bilingual/dual titles
+  if (title.includes('/')) {
+    for (const part of title.split('/')) add(part);
   }
+
+  // 4. Split by colon (primary title)
+  if (base.includes(':')) {
+    add(base.split(':')[0]);
+  }
+
+  // 5. Split by spaced dash
+  if (/\s[-–—]\s/.test(base)) {
+    add(base.split(/\s[-–—]\s/)[0]);
+  }
+
+  // 6. Cleaned variants
+  add(cleanGameTitleForSearch(base));
+  if (noEdition && noEdition !== base) {
+    add(cleanGameTitleForSearch(noEdition));
+  }
+
+  return Array.from(candidates);
 }
 
-// Calculate string similarity percentage using Levenshtein distance
 function calcDistancePercentage(text, term) {
-  let longer = String(text).toLowerCase().trim();
-  let shorter = String(term).toLowerCase().trim();
+  let longer = String(text || '').toLowerCase().trim();
+  let shorter = String(term || '').toLowerCase().trim();
   if (longer.length < shorter.length) {
-    let temp = longer;
-    longer = shorter;
-    shorter = temp;
+    [longer, shorter] = [shorter, longer];
   }
-  let longerLength = longer.length;
+  const longerLength = longer.length;
   if (longerLength === 0) return 1.0;
-  
-  const costs = [];
+
+  const costs = new Array(shorter.length + 1);
   for (let i = 0; i <= longer.length; i++) {
     let lastValue = i;
     for (let j = 0; j <= shorter.length; j++) {
       if (i === 0) {
         costs[j] = j;
-      } else {
-        if (j > 0) {
-          let newValue = costs[j - 1];
-          if (longer.charAt(i - 1) !== shorter.charAt(j - 1)) {
-            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-          }
-          costs[j - 1] = lastValue;
-          lastValue = newValue;
+      } else if (j > 0) {
+        let newValue = costs[j - 1];
+        if (longer.charAt(i - 1) !== shorter.charAt(j - 1)) {
+          newValue = Math.min(newValue, lastValue, costs[j]) + 1;
         }
+        costs[j - 1] = lastValue;
+        lastValue = newValue;
       }
     }
     if (i > 0) costs[shorter.length] = lastValue;
   }
+
   const dist = costs[shorter.length];
   return Math.round(((longerLength - dist) / longerLength) * 100) / 100;
 }
 
-// Load configuration
+// ============================================================================
+// PRELOADED OFFLINE HLTB DATASET
+// ============================================================================
+
+let preloadedHltbData = {};
+let preloadedEntriesIndex = null; // Lazy array for fallback search
+
+try {
+  const preloadedPath = path.join(__dirname, 'static', 'js', 'preloaded_hltb.json');
+  if (fs.existsSync(preloadedPath)) {
+    preloadedHltbData = JSON.parse(fs.readFileSync(preloadedPath, 'utf8'));
+    console.log(`[Startup] Loaded ${Object.keys(preloadedHltbData).length} preloaded offline HLTB profiles.`);
+  }
+} catch (err) {
+  console.warn('[Startup] Warning: Could not load preloaded HLTB database:', err.message);
+}
+
+function lookupPreloadedHltb(title) {
+  if (!title || !preloadedHltbData) return null;
+
+  const candidates = generateSearchCandidates(title);
+  for (const cand of candidates) {
+    const clean = cleanGameTitleForSearch(cand);
+    const entry = preloadedHltbData[clean] || preloadedHltbData[cand.toLowerCase()];
+    if (entry) {
+      return {
+        hltbId: String(entry.hltbId || ''),
+        title: entry.title || title,
+        gameplayMain: entry.gameplayMain || 0,
+        gameplayMainExtra: entry.gameplayMainExtra || 0,
+        gameplayCompletionist: entry.gameplayCompletionist || 0,
+        imageUrl: entry.imageUrl || '',
+        developers: entry.developers || '',
+        publishers: entry.publishers || '',
+        genres: entry.genres || '',
+        platforms: entry.platforms || '',
+        releaseYear: entry.releaseYear || null,
+        notFound: false,
+        source: 'dataset'
+      };
+    }
+  }
+  return null;
+}
+
+function hasAnyPlaytime(hltb) {
+  if (!hltb || hltb.notFound) return false;
+  return (hltb.gameplayMain || 0) > 0 || (hltb.gameplayMainExtra || 0) > 0 || (hltb.gameplayCompletionist || 0) > 0;
+}
+
+function mergeDatasetMetadata(hltbEntry, gameName) {
+  if (!hltbEntry || hltbEntry.notFound) return hltbEntry;
+  if (hltbEntry.genres && hltbEntry.developers && hltbEntry.releaseYear) return hltbEntry;
+
+  const preloaded = lookupPreloadedHltb(hltbEntry.title || gameName) || lookupPreloadedHltb(gameName);
+  if (!preloaded) return hltbEntry;
+
+  return {
+    ...hltbEntry,
+    genres: hltbEntry.genres || preloaded.genres || '',
+    developers: hltbEntry.developers || preloaded.developers || '',
+    publishers: hltbEntry.publishers || preloaded.publishers || '',
+    platforms: hltbEntry.platforms || preloaded.platforms || '',
+    releaseYear: hltbEntry.releaseYear || preloaded.releaseYear || null
+  };
+}
+
+function searchPreloadedDataset(query, limit = 15) {
+  const q = cleanGameTitleForSearch(query);
+  if (!q) return [];
+  if (!preloadedEntriesIndex) {
+    preloadedEntriesIndex = Object.entries(preloadedHltbData);
+  }
+
+  const matches = [];
+  for (const [key, entry] of preloadedEntriesIndex) {
+    if (key.includes(q) || (entry.title && entry.title.toLowerCase().includes(query.toLowerCase()))) {
+      const score = key === q ? 2 : (key.startsWith(q) ? 1.5 : calcDistancePercentage(key, q));
+      matches.push({ entry, score });
+      if (matches.length >= 200) break;
+    }
+  }
+
+  matches.sort((a, b) => b.score - a.score);
+  return matches.slice(0, limit).map(({ entry }) => ({
+    hltbId: String(entry.hltbId || ''),
+    title: entry.title || '',
+    gameplayMain: entry.gameplayMain || 0,
+    gameplayMainExtra: entry.gameplayMainExtra || 0,
+    gameplayCompletionist: entry.gameplayCompletionist || 0,
+    releaseYear: entry.releaseYear || null,
+    genres: entry.genres || '',
+    developers: entry.developers || '',
+    publishers: entry.publishers || '',
+    platforms: entry.platforms || '',
+    imageUrl: entry.imageUrl || '',
+    source: 'dataset'
+  }));
+}
+
+// ============================================================================
+// RESILIENT HOWLONGTOBEAT CLIENT (Multi-endpoint + Single-flight Auth)
+// ============================================================================
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const HLTB_ENDPOINTS = [
+  { search: 'https://howlongtobeat.com/api/search/site', init: 'https://howlongtobeat.com/api/search/site/init' },
+  { search: 'https://howlongtobeat.com/api/bleed', init: 'https://howlongtobeat.com/api/bleed/init' },
+  { search: 'https://howlongtobeat.com/api/find', init: 'https://howlongtobeat.com/api/find/init' }
+];
+
+let activeEndpointIdx = 0;
+let hltbAuthCache = null;
+let hltbAuthTime = 0;
+let hltbAuthPromise = null;
+const inFlightHltbRequests = new Map();
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getHltbAuth(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && hltbAuthCache && (now - hltbAuthTime < 10 * 60 * 1000)) {
+    return hltbAuthCache;
+  }
+  if (hltbAuthPromise) {
+    return hltbAuthPromise;
+  }
+
+  hltbAuthPromise = (async () => {
+    // Try active endpoint first, then cycle through fallbacks
+    const order = [
+      activeEndpointIdx,
+      ...HLTB_ENDPOINTS.map((_, idx) => idx).filter(idx => idx !== activeEndpointIdx)
+    ];
+
+    for (const idx of order) {
+      const ep = HLTB_ENDPOINTS[idx];
+      try {
+        const res = await fetchWithTimeout(`${ep.init}?t=${Date.now()}`, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Referer': 'https://howlongtobeat.com/',
+            'Origin': 'https://howlongtobeat.com',
+            'Accept': 'application/json'
+          }
+        }, 8000);
+
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data && data.token) {
+          activeEndpointIdx = idx;
+          hltbAuthCache = {
+            token: data.token,
+            hpKey: data.hpKey,
+            hpVal: data.hpVal,
+            endpoint: ep
+          };
+          hltbAuthTime = Date.now();
+          console.log(`[HLTB] Security context initialized via ${ep.init}`);
+          return hltbAuthCache;
+        }
+      } catch (err) {
+        console.warn(`[HLTB] Init failed for ${ep.init}: ${err.message}`);
+      }
+    }
+
+    hltbAuthCache = null;
+    return null;
+  })();
+
+  try {
+    return await hltbAuthPromise;
+  } finally {
+    hltbAuthPromise = null;
+  }
+}
+
+async function queryHltbApi(term, size = 15) {
+  const searchTerms = String(term || '').trim().split(/\s+/).filter(Boolean);
+  if (searchTerms.length === 0) return [];
+
+  const runWithAuth = async (auth) => {
+    const payload = {
+      searchType: 'games',
+      searchTerms,
+      searchPage: 1,
+      size,
+      searchOptions: {
+        games: {
+          userId: 0,
+          platform: '',
+          sortCategory: 'popular',
+          rangeCategory: 'main',
+          rangeTime: { min: 0, max: 0 },
+          gameplay: { perspective: '', flow: '', genre: '', difficulty: '' },
+          rangeYear: { min: '', max: '' },
+          year: '',
+          modifier: ''
+        },
+        users: { sortCategory: 'postcount' },
+        lists: { sortCategory: 'follows' },
+        filter: '',
+        sort: 0,
+        randomizer: 0
+      },
+      useCache: true
+    };
+
+    if (auth.hpKey) {
+      payload[auth.hpKey] = auth.hpVal;
+    }
+
+    const headers = {
+      'User-Agent': USER_AGENT,
+      'Content-Type': 'application/json',
+      'Origin': 'https://howlongtobeat.com',
+      'Referer': 'https://howlongtobeat.com/',
+      'x-auth-token': auth.token
+    };
+    if (auth.hpKey) {
+      headers['x-hp-key'] = auth.hpKey;
+      headers['x-hp-val'] = auth.hpVal;
+    }
+
+    const response = await fetchWithTimeout(auth.endpoint.search, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    }, 10000);
+
+    if (response.status === 403 || response.status === 404) {
+      return { retry: true, status: response.status };
+    }
+    if (!response.ok) {
+      throw new Error(`HLTB search failed (${response.status})`);
+    }
+    const json = await response.json();
+    return { retry: false, data: json.data || [] };
+  };
+
+  let auth = await getHltbAuth(false);
+  if (!auth) return [];
+
+  let outcome = await runWithAuth(auth);
+  if (outcome.retry) {
+    console.warn(`[HLTB] Endpoint returned ${outcome.status}; refreshing auth & retrying...`);
+    hltbAuthCache = null;
+    if (outcome.status === 404) {
+      activeEndpointIdx = (activeEndpointIdx + 1) % HLTB_ENDPOINTS.length;
+    }
+    auth = await getHltbAuth(true);
+    if (!auth) return [];
+    outcome = await runWithAuth(auth);
+  }
+
+  return outcome.data || [];
+}
+
+function formatLiveHltbMatch(match, queryTitle, similarity = null) {
+  return {
+    hltbId: String(match.game_id),
+    title: match.game_name || queryTitle,
+    gameplayMain: Math.round((match.comp_main || 0) / 3600),
+    gameplayMainExtra: Math.round((match.comp_plus || 0) / 3600),
+    gameplayCompletionist: Math.round((match.comp_100 || 0) / 3600),
+    releaseYear: match.release_world || null,
+    imageUrl: match.game_image ? `https://howlongtobeat.com/games/${match.game_image}` : '',
+    similarity: similarity !== null ? similarity : calcDistancePercentage(match.game_name, queryTitle),
+    notFound: false,
+    source: 'live'
+  };
+}
+
+async function scrapeBestHltbMatch(rawTitle) {
+  const candidates = generateSearchCandidates(rawTitle);
+  let results = [];
+  let matchedCandidate = rawTitle;
+
+  for (const cand of candidates) {
+    try {
+      const hits = await queryHltbApi(cand, 15);
+      if (hits && hits.length > 0) {
+        results = hits;
+        matchedCandidate = cand;
+        break;
+      }
+    } catch (err) {
+      console.warn(`[HLTB] Candidate search failed for "${cand}": ${err.message}`);
+    }
+  }
+
+  if (results.length === 0) return null;
+
+  const normRaw = rawTitle.toLowerCase().trim();
+  const normCand = matchedCandidate.toLowerCase().trim();
+  const cleanRaw = cleanGameTitleForSearch(rawTitle);
+
+  let bestMatch = results[0];
+  let bestScore = -1;
+
+  for (const item of results) {
+    const itemName = String(item.game_name || '').toLowerCase().trim();
+    const cleanItem = cleanGameTitleForSearch(item.game_name || '');
+    const hasHours = (item.comp_main || 0) > 0 || (item.comp_plus || 0) > 0 || (item.comp_100 || 0) > 0;
+
+    if (itemName === normRaw || itemName === normCand || (cleanItem && cleanItem === cleanRaw)) {
+      bestMatch = item;
+      bestScore = 1.0;
+      if (hasHours) break;
+    }
+
+    const score = Math.max(
+      calcDistancePercentage(itemName, normRaw),
+      calcDistancePercentage(itemName, normCand),
+      calcDistancePercentage(cleanItem, cleanRaw)
+    ) + (hasHours ? 0.02 : 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = item;
+    }
+  }
+
+  return formatLiveHltbMatch(bestMatch, rawTitle, Math.min(1, Math.round(bestScore * 100) / 100));
+}
+
+// ============================================================================
+// CONFIGURATION & ATOMIC DATABASE PERSISTENCE
+// ============================================================================
+
 function loadConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
     return { STEAM_API_KEY: '', STEAM_ID: '', FAMILY_STEAM_IDS: [] };
   }
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return {
+      STEAM_API_KEY: parsed.STEAM_API_KEY || '',
+      STEAM_ID: parsed.STEAM_ID || '',
+      FAMILY_STEAM_IDS: Array.isArray(parsed.FAMILY_STEAM_IDS) ? parsed.FAMILY_STEAM_IDS : []
+    };
   } catch (err) {
-    console.error('Error reading config.json:', err);
+    console.error('Error reading config.json:', err.message);
     return { STEAM_API_KEY: '', STEAM_ID: '', FAMILY_STEAM_IDS: [] };
   }
 }
 
+function isConfigValid(config) {
+  return Boolean(
+    config.STEAM_API_KEY &&
+    config.STEAM_API_KEY !== 'YOUR_STEAM_API_KEY_HERE' &&
+    config.STEAM_ID &&
+    config.STEAM_ID !== 'YOUR_STEAM_ID_64_HERE'
+  );
+}
+
 let dbInMemory = null;
 let saveTimeout = null;
+let dbDirty = false;
+let isWritingDb = false;
 
-// Load local database
 function loadDb() {
   if (dbInMemory) return dbInMemory;
   if (!fs.existsSync(DB_PATH)) {
-    dbInMemory = { games: [], hltb: {}, lastSync: 0 };
+    dbInMemory = { games: [], hltb: {}, manualBeaten: [], manualUnbeaten: [], lastSync: 0 };
   } else {
     try {
       dbInMemory = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
     } catch (err) {
-      console.error('Error reading db.json, returning empty database:', err);
-      dbInMemory = { games: [], hltb: {}, lastSync: 0 };
+      console.error('Error reading db.json, initializing clean database:', err.message);
+      dbInMemory = { games: [], hltb: {}, manualBeaten: [], manualUnbeaten: [], lastSync: 0 };
     }
   }
-  if (!dbInMemory.hltb) dbInMemory.hltb = {};
-  if (!dbInMemory.games) dbInMemory.games = [];
+  if (!dbInMemory.hltb || typeof dbInMemory.hltb !== 'object') dbInMemory.hltb = {};
+  if (!Array.isArray(dbInMemory.games)) dbInMemory.games = [];
+  if (!Array.isArray(dbInMemory.manualBeaten)) dbInMemory.manualBeaten = [];
+  if (!Array.isArray(dbInMemory.manualUnbeaten)) dbInMemory.manualUnbeaten = [];
+  if (typeof dbInMemory.lastSync !== 'number') dbInMemory.lastSync = 0;
   return dbInMemory;
 }
 
-// Save local database (with 500ms debounce to prevent concurrent file write conflicts)
-function saveDb(db) {
-  dbInMemory = db;
-  
-  if (saveTimeout) clearTimeout(saveTimeout);
-  
-  saveTimeout = setTimeout(() => {
-    try {
-      fs.writeFileSync(DB_PATH, JSON.stringify(dbInMemory, null, 2), 'utf8');
-    } catch (err) {
-      console.error('Error writing db.json:', err);
+async function writeDbAtomicAsync() {
+  if (!dbInMemory || !dbDirty || isWritingDb) return;
+  isWritingDb = true;
+  dbDirty = false;
+  const tmpPath = `${DB_PATH}.tmp`;
+  try {
+    const serialized = JSON.stringify(dbInMemory, null, 2);
+    await fsp.writeFile(tmpPath, serialized, 'utf8');
+    await fsp.rename(tmpPath, DB_PATH);
+  } catch (err) {
+    console.error('Error saving db.json:', err.message);
+    dbDirty = true;
+  } finally {
+    isWritingDb = false;
+    if (dbDirty) {
+      saveDb(dbInMemory);
     }
-  }, 500);
+  }
 }
 
-// Flush any pending database changes to disk on process exit
+function saveDb(db) {
+  dbInMemory = db;
+  dbDirty = true;
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    writeDbAtomicAsync();
+  }, 600);
+}
+
 const flushDbOnExit = () => {
-  if (dbInMemory) {
+  if (dbInMemory && dbDirty) {
     try {
-      fs.writeFileSync(DB_PATH, JSON.stringify(dbInMemory, null, 2), 'utf8');
-      console.log('Database successfully flushed to disk.');
+      const tmpPath = `${DB_PATH}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(dbInMemory, null, 2), 'utf8');
+      fs.renameSync(tmpPath, DB_PATH);
+      dbDirty = false;
+      console.log('Database flushed to disk.');
     } catch (err) {
-      console.error('Error flushing db.json on exit:', err);
+      console.error('Error flushing db.json on exit:', err.message);
     }
   }
 };
 
 if (isElectron) {
   const { app: electronApp } = require('electron');
-  electronApp.on('will-quit', () => {
-    flushDbOnExit();
-  });
+  electronApp.on('will-quit', flushDbOnExit);
 }
+process.on('SIGINT', () => { flushDbOnExit(); process.exit(0); });
+process.on('SIGTERM', () => { flushDbOnExit(); process.exit(0); });
 
-process.on('SIGINT', () => {
-  flushDbOnExit();
-  process.exit(0);
-});
+// ============================================================================
+// STEAM WEB API HELPERS
+// ============================================================================
 
-process.on('SIGTERM', () => {
-  flushDbOnExit();
-  process.exit(0);
-});
-
-
-// In-memory global Steam app list cache (to map appid -> name for shared apps)
 let steamAppListCache = null;
+
 async function fetchSteamAppList() {
   if (steamAppListCache) return steamAppListCache;
   try {
-    console.log('Fetching global Steam app list to resolve shared game names...');
-    const response = await fetch('https://api.steampowered.com/ISteamApps/GetAppList/v2/');
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    console.log('Fetching global Steam app list for shared game name resolution...');
+    const response = await fetchWithTimeout('https://api.steampowered.com/ISteamApps/GetAppList/v2/', {}, 15000);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    const apps = data.applist.apps;
+    const apps = data.applist?.apps || [];
     steamAppListCache = new Map();
-    for (const app of apps) {
-      steamAppListCache.set(app.appid, app.name);
+    for (const item of apps) {
+      steamAppListCache.set(item.appid, item.name);
     }
-    console.log(`Successfully indexed ${steamAppListCache.size} Steam apps.`);
+    console.log(`Indexed ${steamAppListCache.size} Steam apps.`);
     return steamAppListCache;
   } catch (err) {
-    console.error('Failed to retrieve Steam app list:', err);
-    return new Map();
+    console.warn('Could not retrieve global Steam app list:', err.message);
+    steamAppListCache = new Map();
+    return steamAppListCache;
   }
 }
 
-// Helper to look up a game name by appid
-async function getGameName(appid) {
-  const list = await fetchSteamAppList();
-  return list.get(Number(appid)) || `Unknown Game (${appid})`;
-}
-
-// Helper to resolve a Steam vanity URL (e.g., custom URL/username) to a 17-digit SteamID64
 async function resolveSteamId(apiKey, inputId) {
   if (!inputId) return '';
   const trimmed = String(inputId).trim();
-  // If it's already a 17-digit numeric SteamID64, return it
-  if (/^\d{17}$/.test(trimmed)) {
-    return trimmed;
-  }
-  
-  console.log(`SteamID "${trimmed}" is not a 17-digit number. Attempting to resolve via ResolveVanityURL...`);
+  if (/^\d{17}$/.test(trimmed)) return trimmed;
+
   try {
-    const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${trimmed}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.warn(`ResolveVanityURL failed for "${trimmed}", status: ${res.status}`);
-      return trimmed;
-    }
+    const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${encodeURIComponent(apiKey)}&vanityurl=${encodeURIComponent(trimmed)}`;
+    const res = await fetchWithTimeout(url, {}, 10000);
+    if (!res.ok) return trimmed;
     const data = await res.json();
     if (data.response?.success === 1 && data.response?.steamid) {
-      console.log(`Successfully resolved vanity URL "${trimmed}" to SteamID64: ${data.response.steamid}`);
       return data.response.steamid;
-    } else {
-      console.warn(`Could not resolve vanity URL "${trimmed}" (success code: ${data.response?.success || 'none'}). Using as-is.`);
     }
   } catch (err) {
-    console.error(`Error in ResolveVanityURL for "${trimmed}":`, err);
+    console.warn(`Error resolving vanity URL "${trimmed}":`, err.message);
   }
   return trimmed;
 }
 
-// Fetch owned games for a Steam ID
 async function fetchOwnedGames(apiKey, steamId) {
-  const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamId}&include_appinfo=true&include_played_free_games=true&format=json`;
+  const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${encodeURIComponent(apiKey)}&steamid=${encodeURIComponent(steamId)}&include_appinfo=true&include_played_free_games=true&format=json`;
   try {
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, {}, 15000);
     if (!res.ok) {
-      console.error(`Failed to fetch owned games for ${steamId}, status: ${res.status}`);
+      console.error(`Failed to fetch owned games for ${steamId} (HTTP ${res.status})`);
       return [];
     }
     const data = await res.json();
     return data.response?.games || [];
   } catch (err) {
-    console.error(`Error fetching owned games for ${steamId}:`, err);
+    console.error(`Error fetching owned games for ${steamId}:`, err.message);
     return [];
   }
 }
 
-// Fetch family sharing games via IFamilyGroupsService
 async function fetchFamilySharingGames(apiKey, steamId) {
   try {
-    // 1. Get family group for user
-    const groupUrl = `https://api.steampowered.com/IFamilyGroupsService/GetFamilyGroupForUser/v1/?key=${apiKey}&steamid=${steamId}`;
-    const groupRes = await fetch(groupUrl);
-    if (!groupRes.ok) {
-      console.warn(`IFamilyGroupsService/GetFamilyGroupForUser not available or rejected. Status: ${groupRes.status}`);
-      return { apps: [], members: [] };
-    }
-    
+    const groupUrl = `https://api.steampowered.com/IFamilyGroupsService/GetFamilyGroupForUser/v1/?key=${encodeURIComponent(apiKey)}&steamid=${encodeURIComponent(steamId)}`;
+    const groupRes = await fetchWithTimeout(groupUrl, {}, 10000);
+    if (!groupRes.ok) return { apps: [], members: [] };
+
     const groupData = await groupRes.json();
     const familyGroupId = groupData.response?.family_groupid;
     const members = groupData.response?.family_group?.members || [];
-    
-    if (!familyGroupId) {
-      console.log('No family group ID returned for user.');
-      return { apps: [], members };
-    }
-    
-    console.log(`Found Family Group: ${familyGroupId}. Fetching shared library apps...`);
-    
-    // 2. Get shared apps in the family group
-    const appsUrl = `https://api.steampowered.com/IFamilyGroupsService/GetSharedLibraryApps/v1/?key=${apiKey}&family_groupid=${familyGroupId}&include_cooldown_games=true&include_free_games=true`;
-    const appsRes = await fetch(appsUrl);
-    if (!appsRes.ok) {
-      console.warn(`IFamilyGroupsService/GetSharedLibraryApps failed. Status: ${appsRes.status}`);
-      return { apps: [], members };
-    }
-    
+    if (!familyGroupId) return { apps: [], members };
+
+    const appsUrl = `https://api.steampowered.com/IFamilyGroupsService/GetSharedLibraryApps/v1/?key=${encodeURIComponent(apiKey)}&family_groupid=${encodeURIComponent(familyGroupId)}&include_cooldown_games=true&include_free_games=true`;
+    const appsRes = await fetchWithTimeout(appsUrl, {}, 10000);
+    if (!appsRes.ok) return { apps: [], members };
+
     const appsData = await appsRes.json();
-    const apps = appsData.response?.apps || [];
-    return { apps, members };
+    return { apps: appsData.response?.apps || [], members };
   } catch (err) {
-    console.warn('Error fetching family sharing games via Steam API:', err.message);
+    console.warn('Family groups API unavailable:', err.message);
     return { apps: [], members: [] };
   }
 }
 
-// API endpoint to fetch the cached aggregated library from local db
+function resolveHltbForGame(game, hltbMap) {
+  const appidKey = `appid:${game.appid}`;
+  const nameKey = game.name ? game.name.trim().toLowerCase() : '';
+
+  // 1. Explicit per-appid override (from manual rematch/refresh)
+  if (hltbMap[appidKey]) {
+    return mergeDatasetMetadata(hltbMap[appidKey], game.name);
+  }
+
+  // 2. Cached entry by game name
+  if (nameKey && hltbMap[nameKey]) {
+    const cached = hltbMap[nameKey];
+    if (!cached.notFound) {
+      return mergeDatasetMetadata(cached, game.name);
+    }
+    return cached;
+  }
+
+  // 3. Offline preloaded dataset (instant, zero API calls)
+  const preloaded = lookupPreloadedHltb(game.name);
+  if (preloaded && hasAnyPlaytime(preloaded)) {
+    return preloaded;
+  }
+
+  return null;
+}
+
+// ============================================================================
+// API ROUTES
+// ============================================================================
+
 app.get('/api/games', (req, res) => {
   const db = loadDb();
+  const config = loadConfig();
   const games = db.games || [];
-  const hltb = db.hltb || {};
-  
-  const gamesWithHltb = games.map(game => {
-    const cacheKey = game.name ? game.name.trim().toLowerCase() : '';
-    return {
-      ...game,
-      hltb: hltb[cacheKey] || null
-    };
-  });
-  
+  const hltbMap = db.hltb || {};
+
+  const gamesWithHltb = games.map(game => ({
+    ...game,
+    hltb: resolveHltbForGame(game, hltbMap)
+  }));
+
   res.json({
     games: gamesWithHltb,
-    lastSync: db.lastSync || 0
+    lastSync: db.lastSync || 0,
+    manualBeaten: db.manualBeaten || [],
+    manualUnbeaten: db.manualUnbeaten || [],
+    configured: isConfigValid(config)
   });
 });
 
-// API endpoint to perform a sync with Steam APIs and update the local db
 app.post('/api/sync', async (req, res) => {
   const { force } = req.body || {};
-  
-  if (force) {
-    console.log('Force Full Refresh requested. Clearing database caches...');
-    dbInMemory = { games: [], hltb: {}, lastSync: 0 };
-    try {
-      if (fs.existsSync(DB_PATH)) {
-        fs.unlinkSync(DB_PATH);
-        console.log('Local db.json file deleted successfully.');
-      }
-    } catch (err) {
-      console.error('Error deleting db.json on force sync:', err);
-    }
-  }
 
   const config = loadConfig();
+  if (!isConfigValid(config)) {
+    return res.status(400).json({ error: 'Steam API Key and Steam ID must be configured in Settings.' });
+  }
+
+  const db = loadDb();
+  if (force) {
+    console.log('[Sync] Force Full Refresh requested. Clearing cached games & HLTB entries...');
+    db.games = [];
+    db.hltb = {};
+    db.lastSync = 0;
+  }
+
   const apiKey = config.STEAM_API_KEY;
-  let primaryId = config.STEAM_ID;
   const familyConfigIds = config.FAMILY_STEAM_IDS || [];
 
-  if (!apiKey || apiKey === 'YOUR_STEAM_API_KEY_HERE') {
-    return res.status(400).json({ error: 'Steam API key is not configured in config.json.' });
-  }
-  if (!primaryId || primaryId === 'YOUR_STEAM_ID_64_HERE') {
-    return res.status(400).json({ error: 'Primary Steam ID is not configured in config.json.' });
-  }
-
   try {
-    // Resolve primary Steam ID if it's a vanity URL
-    primaryId = await resolveSteamId(apiKey, primaryId);
+    const primaryId = await resolveSteamId(apiKey, config.STEAM_ID);
 
-    console.log(`Fetching games for primary user ${primaryId}...`);
-    // Fetch primary user games
-    const primaryGames = await fetchOwnedGames(apiKey, primaryId);
-    
-    // Create a map to deduplicate and aggregate all games
-    // Key: appid
+    // Fetch primary library & Steam Families data in parallel
+    const [primaryGames, familyData] = await Promise.all([
+      fetchOwnedGames(apiKey, primaryId),
+      fetchFamilySharingGames(apiKey, primaryId)
+    ]);
+
     const gamesMap = new Map();
-    
     for (const game of primaryGames) {
       gamesMap.set(game.appid, {
         appid: game.appid,
-        name: game.name,
+        name: game.name || `Steam App ${game.appid}`,
         playtime_forever: game.playtime_forever || 0,
         img_icon_url: game.img_icon_url || '',
         owner_steamid: primaryId,
@@ -459,33 +752,27 @@ app.post('/api/sync', async (req, res) => {
       });
     }
 
-    // Try to fetch games using the Steam Families API
-    console.log('Attempting to fetch family sharing games via IFamilyGroupsService...');
-    const familyData = await fetchFamilySharingGames(apiKey, primaryId);
-    
-    // Merge shared apps from Steam Families API
+    // Merge shared apps from IFamilyGroupsService
     if (familyData.apps && familyData.apps.length > 0) {
-      console.log(`Processing ${familyData.apps.length} family sharing apps...`);
+      const missingNameApps = familyData.apps.filter(a => !gamesMap.has(a.appid));
+      const appList = missingNameApps.length > 0 ? await fetchSteamAppList() : new Map();
+
       for (const appInfo of familyData.apps) {
         const appid = appInfo.appid;
         const owners = appInfo.owner_steamids || [];
         const owner = owners[0] || 'family';
 
         if (gamesMap.has(appid)) {
-          // User already has this game in their list (probably played it)
           const existing = gamesMap.get(appid);
-          // If the owner is not the primary user, it's shared
           if (owner !== primaryId) {
             existing.is_owned = false;
             existing.owner_steamid = owner;
             existing.source = 'family_api';
           }
         } else {
-          // Retrieve game name from the global list
-          const gameName = await getGameName(appid);
           gamesMap.set(appid, {
-            appid: appid,
-            name: gameName,
+            appid,
+            name: appList.get(Number(appid)) || `Unknown Game (${appid})`,
             playtime_forever: 0,
             img_icon_url: '',
             owner_steamid: owner,
@@ -496,180 +783,238 @@ app.post('/api/sync', async (req, res) => {
       }
     }
 
-    // Also fetch games from manual family config IDs (in case API key has no access to IFamilyGroupsService)
-    const combinedFamilyIds = new Set();
-    for (const id of familyConfigIds) {
-      const resolvedId = await resolveSteamId(apiKey, id);
-      if (resolvedId && resolvedId !== primaryId) {
-        combinedFamilyIds.add(resolvedId);
-      }
-    }
-    // Extract any members from the family API response who aren't the primary user
+    // Resolve and fetch all configured + discovered family members in parallel
+    const resolvedManualFamily = await Promise.all(
+      familyConfigIds.map(id => resolveSteamId(apiKey, id))
+    );
+    const combinedFamilyIds = new Set(resolvedManualFamily.filter(id => id && id !== primaryId));
+
     if (familyData.members) {
-      familyData.members.forEach(member => {
+      for (const member of familyData.members) {
         if (member.steamid && member.steamid !== primaryId) {
           combinedFamilyIds.add(member.steamid);
         }
-      });
+      }
     }
 
     if (combinedFamilyIds.size > 0) {
-      console.log(`Fetching games for configured/discovered family members: ${Array.from(combinedFamilyIds).join(', ')}`);
-      for (const memberId of combinedFamilyIds) {
-        const memberGames = await fetchOwnedGames(apiKey, memberId);
-        console.log(`Fetched ${memberGames.length} games for member ${memberId}`);
+      const memberIds = Array.from(combinedFamilyIds);
+      const memberLibraries = await Promise.all(
+        memberIds.map(async (memberId) => ({
+          memberId,
+          games: await fetchOwnedGames(apiKey, memberId)
+        }))
+      );
+
+      for (const { memberId, games: memberGames } of memberLibraries) {
         for (const game of memberGames) {
-          const appid = game.appid;
-          if (!gamesMap.has(appid)) {
-            gamesMap.set(appid, {
+          if (!gamesMap.has(game.appid)) {
+            gamesMap.set(game.appid, {
               appid: game.appid,
-              name: game.name,
-              playtime_forever: 0, // Since it's owned by family, primary user playtime is 0 unless they played it too (handled above)
+              name: game.name || `Steam App ${game.appid}`,
+              playtime_forever: 0,
               img_icon_url: game.img_icon_url || '',
               owner_steamid: memberId,
               is_owned: false,
               source: 'family_manual'
             });
+          } else {
+            // Upgrade placeholder name if family API missed it
+            const existing = gamesMap.get(game.appid);
+            if (existing.name.startsWith('Unknown Game (') && game.name) {
+              existing.name = game.name;
+              existing.img_icon_url = game.img_icon_url || existing.img_icon_url;
+            }
           }
         }
       }
     }
 
     const allGames = Array.from(gamesMap.values());
-    console.log(`Total combined games list has ${allGames.length} titles.`);
-    
-    // Save to local unified db
-    const db = loadDb();
     db.games = allGames;
     db.lastSync = Date.now();
     saveDb(db);
 
+    const gamesWithHltb = allGames.map(game => ({
+      ...game,
+      hltb: resolveHltbForGame(game, db.hltb)
+    }));
+
+    console.log(`[Sync] Aggregated ${allGames.length} total games.`);
     res.json({
-      games: allGames,
-      lastSync: db.lastSync
+      games: gamesWithHltb,
+      lastSync: db.lastSync,
+      manualBeaten: db.manualBeaten || [],
+      manualUnbeaten: db.manualUnbeaten || []
     });
   } catch (err) {
-    console.error('Error fetching aggregated games list:', err);
-    res.status(500).json({ error: 'Failed to retrieve Steam games.' });
+    console.error('[Sync] Error aggregating Steam games:', err);
+    res.status(500).json({ error: 'Failed to retrieve Steam games. Check your API Key and profile privacy.' });
   }
 });
 
-// Helper to clean Steam game titles for better HLTB search matching
-function cleanGameTitleForSearch(title) {
-  if (!title) return '';
-  let cleaned = title.toLowerCase().trim();
-  
-  // 1. If it contains both English/ASCII and non-ASCII, strip non-ASCII
-  const hasAscii = /[a-z0-9]/.test(cleaned);
-  const hasNonAscii = /[^\x00-\x7F]/.test(cleaned);
-  if (hasAscii && hasNonAscii) {
-    cleaned = cleaned.replace(/[^\x00-\x7F]/g, ' ');
-  }
-  
-  // 2. Replace trademark, registered, copyright, and punctuation symbols with space
-  cleaned = cleaned.replace(/[™®©\-–—/\\_.,]/g, ' ');
-  
-  // 3. Remove anything in parenthesis (e.g. (Beta), (Demo), (soundtrack))
-  cleaned = cleaned.replace(/\([^)]*\)/g, '');
-  
-  // 4. If there is a colon, split and take the first part
-  // e.g. "Ace Combat 7: Skies Unknown" -> "Ace Combat 7"
-  if (cleaned.includes(':')) {
-    cleaned = cleaned.split(':')[0];
-  }
-  
-  // 5. Insert space between adjacent letters and numbers (e.g. combat7 -> combat 7, season2 -> season 2)
-  cleaned = cleaned.replace(/([a-z])([0-9])/g, '$1 $2');
-  cleaned = cleaned.replace(/([0-9])([a-z])/g, '$1 $2');
-  
-  // 6. Collapse multiple spaces
-  cleaned = cleaned.replace(/\s+/g, ' ');
-  
-  return cleaned.trim();
-}
-
-// API endpoint to query HLTB data for a specific game
+// Single-game HLTB lookup (with offline dataset check, caching, and deduplication)
 app.get('/api/hltb', async (req, res) => {
-  const { title, appid } = req.query;
+  const { title, appid, force } = req.query;
   if (!title) {
     return res.status(400).json({ error: 'title parameter is required.' });
   }
 
-  // Check preloaded database first
-  if (appid && preloadedHltbData && preloadedHltbData[appid]) {
-    return res.json(preloadedHltbData[appid]);
-  }
-
   const db = loadDb();
-  if (!db.hltb) db.hltb = {};
-  
-  // Clean title for keys
+  const forceRefresh = force === '1' || force === 'true';
+  const appidKey = appid ? `appid:${appid}` : null;
   const cacheKey = title.trim().toLowerCase();
 
-  // Check cache
-  if (db.hltb[cacheKey] !== undefined) {
-    return res.json(db.hltb[cacheKey]);
+  if (!forceRefresh) {
+    if (appidKey && db.hltb[appidKey]) {
+      return res.json(mergeDatasetMetadata(db.hltb[appidKey], title));
+    }
+    if (db.hltb[cacheKey] !== undefined) {
+      return res.json(mergeDatasetMetadata(db.hltb[cacheKey], title));
+    }
+    const preloaded = lookupPreloadedHltb(title);
+    if (preloaded && hasAnyPlaytime(preloaded)) {
+      db.hltb[cacheKey] = preloaded;
+      saveDb(db);
+      return res.json(preloaded);
+    }
   }
 
-  try {
-    console.log(`Searching HowLongToBeat for: "${title}"...`);
-    let results = await scrapeHltb(title);
-    
-    // Fallback: If no results, try cleaning the title (removing ™, subtitles, etc.)
-    if (!results || results.length === 0) {
-      const cleanTitle = cleanGameTitleForSearch(title);
-      if (cleanTitle && cleanTitle !== title.toLowerCase().trim()) {
-        console.log(`No results for raw title. Retrying HLTB search with clean title: "${cleanTitle}"...`);
-        results = await scrapeHltb(cleanTitle);
-      }
+  // Deduplicate concurrent identical live requests
+  const flightKey = `${cacheKey}:${forceRefresh ? '1' : '0'}`;
+  if (inFlightHltbRequests.has(flightKey)) {
+    try {
+      const result = await inFlightHltbRequests.get(flightKey);
+      return res.json(result);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-    
-    let hltbData = null;
-    
-    if (results && results.length > 0) {
-      // Find the best match
-      // If there is an exact name match, use it. Otherwise, use the first result.
-      const exactMatch = results.find(r => r.game_name?.toLowerCase() === cacheKey);
-      const match = exactMatch || results[0];
-      
-      hltbData = {
-        hltbId: String(match.game_id),
-        title: match.game_name,
-        gameplayMain: Math.round((match.comp_main || 0) / 3600),
-        gameplayMainExtra: Math.round((match.comp_plus || 0) / 3600),
-        gameplayCompletionist: Math.round((match.comp_100 || 0) / 3600),
-        imageUrl: match.game_image ? `https://howlongtobeat.com/games/${match.game_image}` : '',
-        similarity: calcDistancePercentage(match.game_name, title),
-        notFound: false
-      };
-      console.log(`Found HLTB match: "${match.game_name}" (Main Story: ${hltbData.gameplayMain}h)`);
+  }
+
+  const lookupPromise = (async () => {
+    const liveMatch = await scrapeBestHltbMatch(title);
+    let hltbData;
+
+    if (liveMatch) {
+      hltbData = mergeDatasetMetadata(liveMatch, title);
+      console.log(`[HLTB] Matched "${title}" -> "${hltbData.title}" (${hltbData.gameplayMain}h)`);
     } else {
-      hltbData = {
-        title: title,
-        notFound: true
-      };
-      console.log(`No HLTB results found for: "${title}"`);
+      // Fallback to preloaded dataset even if 0h (preserves metadata)
+      const preloaded = lookupPreloadedHltb(title);
+      hltbData = preloaded || { title, notFound: true };
     }
 
-    // Save to database cache
     db.hltb[cacheKey] = hltbData;
+    if (appidKey && forceRefresh) {
+      db.hltb[appidKey] = hltbData;
+    }
     saveDb(db);
+    return hltbData;
+  })();
 
-    res.json(hltbData);
+  inFlightHltbRequests.set(flightKey, lookupPromise);
+  try {
+    const data = await lookupPromise;
+    res.json(data);
   } catch (err) {
-    console.error(`Error querying HLTB for "${title}":`, err.message);
+    console.error(`[HLTB] Error querying "${title}":`, err.message);
     res.status(500).json({ error: `HLTB lookup failed: ${err.message}` });
+  } finally {
+    inFlightHltbRequests.delete(flightKey);
   }
 });
 
-// API endpoint to read current config (with masked API key for security)
+// Interactive HLTB search for manual rematching
+app.get('/api/hltb/search', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+
+  try {
+    const liveHits = await queryHltbApi(q, 15);
+    if (liveHits && liveHits.length > 0) {
+      const results = liveHits.map(item => mergeDatasetMetadata(formatLiveHltbMatch(item, q), item.game_name));
+      return res.json({ results, source: 'live' });
+    }
+  } catch (err) {
+    console.warn(`[HLTB Search] Live search failed for "${q}", using offline dataset:`, err.message);
+  }
+
+  // Fallback to local preloaded dataset search
+  const offlineResults = searchPreloadedDataset(q, 15);
+  res.json({ results: offlineResults, source: 'dataset' });
+});
+
+// Save a manual HLTB rematch for a specific game
+app.post('/api/hltb/rematch', (req, res) => {
+  const { appid, gameName, hltb } = req.body || {};
+  if (!appid || !hltb) {
+    return res.status(400).json({ error: 'appid and hltb payload are required.' });
+  }
+
+  const db = loadDb();
+  const normalized = mergeDatasetMetadata({
+    hltbId: String(hltb.hltbId || ''),
+    title: hltb.title || gameName || '',
+    gameplayMain: Number(hltb.gameplayMain) || 0,
+    gameplayMainExtra: Number(hltb.gameplayMainExtra) || 0,
+    gameplayCompletionist: Number(hltb.gameplayCompletionist) || 0,
+    releaseYear: hltb.releaseYear || null,
+    genres: hltb.genres || '',
+    developers: hltb.developers || '',
+    publishers: hltb.publishers || '',
+    platforms: hltb.platforms || '',
+    imageUrl: hltb.imageUrl || '',
+    notFound: false,
+    manualMatch: true,
+    source: 'manual'
+  }, gameName);
+
+  db.hltb[`appid:${appid}`] = normalized;
+  if (gameName) {
+    db.hltb[gameName.trim().toLowerCase()] = normalized;
+  }
+  saveDb(db);
+
+  res.json({ success: true, hltb: normalized });
+});
+
+// Toggle manual beat status override for a game
+app.post('/api/games/:appid/beat', (req, res) => {
+  const appid = Number(req.params.appid);
+  const { state } = req.body || {}; // 'beaten' | 'unbeaten' | 'auto'
+  if (!appid || !['beaten', 'unbeaten', 'auto'].includes(state)) {
+    return res.status(400).json({ error: 'Valid appid and state (beaten | unbeaten | auto) are required.' });
+  }
+
+  const db = loadDb();
+  const beatenSet = new Set(db.manualBeaten || []);
+  const unbeatenSet = new Set(db.manualUnbeaten || []);
+
+  beatenSet.delete(appid);
+  unbeatenSet.delete(appid);
+
+  if (state === 'beaten') beatenSet.add(appid);
+  if (state === 'unbeaten') unbeatenSet.add(appid);
+
+  db.manualBeaten = Array.from(beatenSet);
+  db.manualUnbeaten = Array.from(unbeatenSet);
+  saveDb(db);
+
+  res.json({
+    success: true,
+    manualBeaten: db.manualBeaten,
+    manualUnbeaten: db.manualUnbeaten
+  });
+});
+
+// Read config (masked API key)
 app.get('/api/config', (req, res) => {
   const config = loadConfig();
   const apiKey = config.STEAM_API_KEY || '';
   const maskedKey = apiKey.length > 8
     ? apiKey.slice(0, 4) + '•'.repeat(apiKey.length - 8) + apiKey.slice(-4)
     : apiKey ? '•'.repeat(apiKey.length) : '';
-  
+
   res.json({
     STEAM_API_KEY_MASKED: maskedKey,
     STEAM_API_KEY_SET: apiKey.length > 0 && apiKey !== 'YOUR_STEAM_API_KEY_HERE',
@@ -678,115 +1023,106 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// API endpoint to update config
+// Update config
 app.post('/api/config', (req, res) => {
-  const { STEAM_API_KEY, STEAM_ID, FAMILY_STEAM_IDS } = req.body;
-  
-  // Load existing config to preserve fields not being updated
+  const { STEAM_API_KEY, STEAM_ID, FAMILY_STEAM_IDS } = req.body || {};
   const existing = loadConfig();
-  
-  // Only overwrite API key if a new one was provided (not the masked placeholder)
-  if (STEAM_API_KEY && !STEAM_API_KEY.includes('•')) {
-    existing.STEAM_API_KEY = STEAM_API_KEY.trim();
+
+  if (STEAM_API_KEY && !String(STEAM_API_KEY).includes('•')) {
+    existing.STEAM_API_KEY = String(STEAM_API_KEY).trim();
   }
-  
   if (STEAM_ID !== undefined) {
     existing.STEAM_ID = String(STEAM_ID).trim();
   }
-  
   if (Array.isArray(FAMILY_STEAM_IDS)) {
     existing.FAMILY_STEAM_IDS = FAMILY_STEAM_IDS.map(id => String(id).trim()).filter(Boolean);
   }
-  
+
   try {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2), 'utf8');
-    console.log('Configuration updated successfully.');
+    console.log('[Config] Updated successfully.');
     res.json({ success: true, message: 'Configuration saved.' });
   } catch (err) {
-    console.error('Error writing config.json:', err);
+    console.error('[Config] Write error:', err.message);
     res.status(500).json({ error: 'Failed to save configuration.' });
   }
 });
 
-// Serve frontend static files
+// Static files & SPA fallback
 app.use(express.static(path.join(__dirname, 'static')));
-
-// Fallback for SPA or simple index
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'static', 'index.html'));
 });
 
+// ============================================================================
+// SERVER STARTUP & ELECTRON LAUNCHER
+// ============================================================================
+
 function openBrowser(url) {
-  const startCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  const cmd = process.platform === 'win32' ? `start "" "${url}"` : `${startCmd} "${url}"`;
+  if (process.env.NO_OPEN_BROWSER === '1') return;
+  const cmd = process.platform === 'win32'
+    ? `start "" "${url}"`
+    : process.platform === 'darwin'
+      ? `open "${url}"`
+      : `xdg-open "${url}"`;
   exec(cmd, (err) => {
-    if (err) {
-      console.error(`Failed to open browser: ${err.message}`);
-    }
+    if (err) console.error(`Failed to open browser: ${err.message}`);
   });
 }
 
-// Start Server
-const listenPort = isElectron ? 0 : PORT;
+function launchElectronWindow(url, serverInstance) {
+  const { app: electronApp, BrowserWindow, shell } = require('electron');
 
+  const createWin = () => {
+    const win = new BrowserWindow({
+      width: 1280,
+      height: 840,
+      minWidth: 900,
+      minHeight: 620,
+      title: 'SteamHLTB',
+      icon: path.join(__dirname, 'static', 'img', 'SteamHLTB-dark-transparent.png'),
+      autoHideMenuBar: true,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    win.loadURL(url);
+    win.webContents.setVisualZoomLevelLimits(1, 1);
+    win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(1));
+
+    win.webContents.setWindowOpenHandler(({ url: extUrl }) => {
+      if (extUrl.startsWith('http://localhost') || extUrl.startsWith('http://127.0.0.1')) {
+        return { action: 'allow' };
+      }
+      shell.openExternal(extUrl).catch(err => console.error(`External URL error: ${err.message}`));
+      return { action: 'deny' };
+    });
+  };
+
+  if (electronApp.isReady()) createWin();
+  else electronApp.whenReady().then(createWin);
+
+  if (serverInstance) {
+    electronApp.on('window-all-closed', () => {
+      serverInstance.close(() => electronApp.quit());
+    });
+  }
+}
+
+const listenPort = isElectron ? 0 : PORT;
 const server = app.listen(listenPort, () => {
   const actualPort = server.address().port;
   const url = `http://localhost:${actualPort}`;
-  console.log(`==================================================`);
-  console.log(`Steam HLTB App server running at ${url}`);
-  console.log(`Centralized configuration: ${CONFIG_PATH}`);
-  console.log(`Local unified database: ${DB_PATH}`);
-  console.log(`==================================================`);
-  
-  if (isElectron) {
-    const { app: electronApp, BrowserWindow, shell } = require('electron');
-    
-    const loadWindow = () => {
-      const win = new BrowserWindow({
-        width: 1200,
-        height: 800,
-        title: "SteamHLTB",
-        icon: path.join(__dirname, 'static', 'img', 'SteamHLTB-dark-transparent.png'),
-        autoHideMenuBar: true,
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true
-        }
-      });
-      
-      win.loadURL(url);
-      
-      // Disable visual zoom limits (pinch zoom)
-      win.webContents.setVisualZoomLevelLimits(1, 1);
-      
-      // Reset zoom factor to 1 on load
-      win.webContents.on('did-finish-load', () => {
-        win.webContents.setZoomFactor(1);
-      });
-      
-      // Open external links in default browser instead of the Electron window
-      win.webContents.setWindowOpenHandler(({ url: extUrl }) => {
-        if (extUrl.startsWith('http://localhost') || extUrl.startsWith('http://127.0.0.1')) {
-          return { action: 'allow' };
-        }
-        shell.openExternal(extUrl).catch(err => {
-          console.error(`Failed to open external URL: ${err.message}`);
-        });
-        return { action: 'deny' };
-      });
-    };
+  console.log('==================================================');
+  console.log(`SteamHLTB server running at ${url}`);
+  console.log(`Config: ${CONFIG_PATH}`);
+  console.log(`Database: ${DB_PATH}`);
+  console.log('==================================================');
 
-    if (electronApp.isReady()) {
-      loadWindow();
-    } else {
-      electronApp.whenReady().then(loadWindow);
-    }
-    
-    electronApp.on('window-all-closed', () => {
-      server.close(() => {
-        electronApp.quit();
-      });
-    });
+  if (isElectron) {
+    launchElectronWindow(url, server);
   } else {
     openBrowser(url);
   }
@@ -794,52 +1130,13 @@ const server = app.listen(listenPort, () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} is already in use. Loading Electron/Browser window...`);
+    const url = `http://localhost:${PORT}`;
+    console.log(`Port ${PORT} is already in use. Opening ${url}...`);
     if (isElectron) {
-      const { app: electronApp, BrowserWindow, shell } = require('electron');
-      const loadWindow = () => {
-        const win = new BrowserWindow({
-          width: 1200,
-          height: 800,
-          title: "SteamHLTB",
-          icon: path.join(__dirname, 'static', 'img', 'SteamHLTB-dark-transparent.png'),
-          autoHideMenuBar: true,
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true
-          }
-        });
-        win.loadURL(`http://localhost:${PORT}`);
-        
-        // Disable visual zoom limits (pinch zoom)
-        win.webContents.setVisualZoomLevelLimits(1, 1);
-        
-        // Reset zoom factor to 1 on load
-        win.webContents.on('did-finish-load', () => {
-          win.webContents.setZoomFactor(1);
-        });
-        
-        win.webContents.setWindowOpenHandler(({ url: extUrl }) => {
-          if (extUrl.startsWith('http://localhost') || extUrl.startsWith('http://127.0.0.1')) {
-            return { action: 'allow' };
-          }
-          shell.openExternal(extUrl).catch(err => {
-            console.error(`Failed to open external URL: ${err.message}`);
-          });
-          return { action: 'deny' };
-        });
-      };
-      
-      if (electronApp.isReady()) {
-        loadWindow();
-      } else {
-        electronApp.whenReady().then(loadWindow);
-      }
+      launchElectronWindow(url, null);
     } else {
-      openBrowser(`http://localhost:${PORT}`);
-      setTimeout(() => {
-        process.exit(0);
-      }, 1000);
+      openBrowser(url);
+      setTimeout(() => process.exit(0), 800);
     }
   } else {
     console.error('Server error:', err);

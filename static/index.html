@@ -2,422 +2,576 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    if (typeof window !== 'undefined' && (window.Capacitor || navigator.userAgent.toLowerCase().includes('android') || navigator.userAgent.toLowerCase().includes('iphone'))) {
-      window.location.replace("mobile.html");
-    }
+    (function () {
+      if (typeof window !== 'undefined' && (window.Capacitor || /android|iphone/i.test(navigator.userAgent))) {
+        window.location.replace('mobile.html');
+        return;
+      }
+      var legacy = localStorage.getItem('theme');
+      var mode = localStorage.getItem('themeMode') || (legacy === 'dark' ? 'dark' : 'light');
+      var lightSkin = localStorage.getItem('lightTheme') || 'ceramic';
+      var darkSkin = localStorage.getItem('darkTheme') || 'obsidian';
+      if (lightSkin !== 'ceramic' && lightSkin !== 'aero') lightSkin = 'ceramic';
+      if (darkSkin !== 'obsidian' && darkSkin !== 'y2k') darkSkin = 'obsidian';
+      var activeTheme = mode === 'dark' ? darkSkin : lightSkin;
+      document.documentElement.setAttribute('data-mode', mode);
+      document.documentElement.setAttribute('data-theme', activeTheme);
+      if (/electron/i.test(navigator.userAgent)) {
+        document.documentElement.classList.add('is-electron');
+      }
+    })();
   </script>
-  <title>Steam Library & HowLongToBeat Dashboard</title>
-  <!-- Google Fonts: Outfit and Share Tech Mono for the LCD look -->
+  <title>SteamHLTB — Steam Backlog &amp; Playtime Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DotGothic16&family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- FontAwesome for icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Open+Sans:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <!-- Y2K Water Gel / Glossy Bubble BG Highlights -->
-  <div class="gel-bg-container">
-    <div class="gel-blob gel-blob-1"></div>
-    <div class="gel-blob gel-blob-2"></div>
-    <div class="gel-blob gel-blob-3"></div>
+  <!-- Purely decorative theme atmosphere layer (zero interactive/layout impact) -->
+  <div class="scene-bg" aria-hidden="true">
+    <div class="scene-atmosphere"></div>
+    <div class="scene-horizon"></div>
+    <div class="scene-flare"></div>
+    <span class="ambient-particle p-1"></span>
+    <span class="ambient-particle p-2"></span>
+    <span class="ambient-particle p-3"></span>
+    <span class="ambient-particle p-4"></span>
+    <span class="ambient-particle p-5"></span>
+    <span class="ambient-particle p-6"></span>
+    <svg class="ambient-aero-svg" viewBox="0 0 220 220" fill="none">
+      <defs>
+        <linearGradient id="aeroLeafGrad" x1="25" y1="20" x2="185" y2="195" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#c4ff8a" stop-opacity="0.72"/>
+          <stop offset="50%" stop-color="#4ee33b" stop-opacity="0.52"/>
+          <stop offset="100%" stop-color="#138c26" stop-opacity="0.65"/>
+        </linearGradient>
+        <radialGradient id="aeroDropGrad" cx="35%" cy="30%" r="65%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.88"/>
+          <stop offset="45%" stop-color="#b8f3ff" stop-opacity="0.38"/>
+          <stop offset="100%" stop-color="#12a6ff" stop-opacity="0.45"/>
+        </radialGradient>
+      </defs>
+      <path d="M188 26C122 30 62 78 44 156C106 164 176 112 188 26Z" fill="url(#aeroLeafGrad)" stroke="rgba(255,255,255,0.65)" stroke-width="2"/>
+      <path d="M44 156C88 124 134 86 184 32" stroke="rgba(255,255,255,0.55)" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="98" cy="112" r="20" fill="url(#aeroDropGrad)" stroke="rgba(255,255,255,0.75)" stroke-width="1.5"/>
+      <ellipse cx="91" cy="104" rx="7" ry="4" transform="rotate(-32 91 104)" fill="rgba(255,255,255,0.88)"/>
+      <circle cx="144" cy="76" r="11" fill="url(#aeroDropGrad)" stroke="rgba(255,255,255,0.75)" stroke-width="1.2"/>
+      <ellipse cx="140" cy="72" rx="4" ry="2.2" transform="rotate(-32 140 72)" fill="rgba(255,255,255,0.9)"/>
+    </svg>
+    <svg class="ambient-y2k-svg" viewBox="0 0 240 240" fill="none">
+      <defs>
+        <linearGradient id="y2kOrbitGrad" x1="15" y1="25" x2="225" y2="215" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#2de2ff" stop-opacity="0.85"/>
+          <stop offset="55%" stop-color="#8a5cff" stop-opacity="0.7"/>
+          <stop offset="100%" stop-color="#ff3fb4" stop-opacity="0.75"/>
+        </linearGradient>
+      </defs>
+      <circle cx="120" cy="120" r="68" stroke="url(#y2kOrbitGrad)" stroke-width="1.2"/>
+      <ellipse cx="120" cy="120" rx="68" ry="24" stroke="url(#y2kOrbitGrad)" stroke-width="1"/>
+      <ellipse cx="120" cy="120" rx="28" ry="68" stroke="url(#y2kOrbitGrad)" stroke-width="1"/>
+      <ellipse cx="120" cy="120" rx="48" ry="68" stroke="url(#y2kOrbitGrad)" stroke-width="0.75" stroke-dasharray="3 4"/>
+      <line x1="52" y1="120" x2="188" y2="120" stroke="#2de2ff" stroke-opacity="0.45" stroke-width="1"/>
+      <ellipse cx="120" cy="120" rx="104" ry="30" transform="rotate(-22 120 120)" stroke="url(#y2kOrbitGrad)" stroke-width="1.4"/>
+      <circle cx="212" cy="83" r="4" fill="#2de2ff"/>
+      <circle cx="32" cy="154" r="3" fill="#ff3fb4"/>
+    </svg>
   </div>
-
-  <!-- Main Skeuomorphic Console Frame -->
-  <div class="y2k-console">
-    <!-- Left Grille panel -->
-    <div class="console-grille left-grille"></div>
-
-    <!-- Main Content Area -->
-    <div class="console-main">
-      <header class="app-header">
-        <div class="header-container">
-          <div class="logo-wrapper">
-            <div class="logo">
-              <img src="/img/SteamHLTB-light-transparent.png" class="logo-img logo-light" alt="SteamHLTB Logo">
-              <img src="/img/SteamHLTB-dark-transparent.png" class="logo-img logo-dark" alt="SteamHLTB Logo">
-            </div>
-            
-            <!-- Coolant capsule repurposed as Theme Toggle Slider -->
-            <div id="capsule-theme-toggle" class="coolant-capsule-badge" role="switch" tabindex="0" aria-checked="false" title="Toggle Theme">
-              <div class="capsule-fluid-core">
-                <span class="capsule-bubble bubble-1"></span>
-                <span class="capsule-bubble bubble-2"></span>
-              </div>
-              <div class="steam-valve-badge-fixed">
-                <i class="fa-brands fa-steam"></i>
-              </div>
-            </div>
+  <div class="app-shell">
+    <!-- Top Bar -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand-cluster">
+          <div class="brand-mark" aria-label="SteamHLTB">
+            <img src="/img/SteamHLTB-light-transparent.png" class="logo-img logo-light" alt="SteamHLTB">
+            <img src="/img/SteamHLTB-dark-transparent.png" class="logo-img logo-dark" alt="SteamHLTB">
           </div>
 
-          <div class="config-info">
-            <span id="config-status" class="status-badge status-loading">
-              <i class="fa-solid fa-circle-notch fa-spin"></i> Checking...
+          <button id="theme-toggle" class="theme-switch" role="switch" aria-checked="false" aria-label="Toggle light and dark theme" title="Switch between Wii Aero and Claude Dark">
+            <span class="theme-switch-track">
+              <span class="theme-switch-icon icon-light"><i class="fa-solid fa-sun"></i></span>
+              <span class="theme-switch-icon icon-dark"><i class="fa-solid fa-moon"></i></span>
+              <span class="theme-switch-thumb">
+                <i class="fa-brands fa-steam-symbol"></i>
+              </span>
             </span>
-            <button id="sync-btn" class="sync-library-btn" style="display: none;">
-              <i class="fa-solid fa-arrows-rotate"></i> Sync Library
+          </button>
+        </div>
+
+        <div class="header-actions">
+          <span id="config-status" class="status-pill status-loading">
+            <span class="status-dot"></span>
+            <span class="status-label">Checking</span>
+          </span>
+
+          <span id="last-sync-time" class="meta-timestamp" hidden></span>
+
+          <button id="sync-btn" class="btn btn-primary" hidden>
+            <i class="fa-solid fa-arrows-rotate"></i>
+            <span>Sync Library</span>
+          </button>
+
+          <button id="settings-btn" class="btn-icon" aria-label="Settings" title="Settings">
+            <i class="fa-solid fa-gear"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="app-main">
+      <!-- Overview KPI Strip -->
+      <section class="stats-strip" id="stats-strip" aria-label="Library overview">
+        <article class="kpi-tile">
+          <div class="kpi-icon kpi-sky"><i class="fa-solid fa-gamepad"></i></div>
+          <div class="kpi-body">
+            <span class="kpi-label">Total Games</span>
+            <strong id="stat-total-games" class="kpi-value">—</strong>
+          </div>
+        </article>
+
+        <article class="kpi-tile">
+          <div class="kpi-icon kpi-cobalt"><i class="fa-regular fa-clock"></i></div>
+          <div class="kpi-body">
+            <span class="kpi-label">Hours Played</span>
+            <strong id="stat-total-playtime" class="kpi-value">—</strong>
+          </div>
+        </article>
+
+        <article class="kpi-tile">
+          <div class="kpi-icon kpi-teal"><i class="fa-solid fa-users"></i></div>
+          <div class="kpi-body">
+            <span class="kpi-label">Family Shared</span>
+            <strong id="stat-shared-games" class="kpi-value">—</strong>
+          </div>
+        </article>
+
+        <article class="kpi-tile">
+          <div class="kpi-icon kpi-sage"><i class="fa-solid fa-check-double"></i></div>
+          <div class="kpi-body">
+            <span class="kpi-label">Completed</span>
+            <strong id="stat-completed-games" class="kpi-value">—</strong>
+          </div>
+        </article>
+      </section>
+
+      <!-- Backlog Insights -->
+      <section id="insights-section" class="insights-panel" hidden>
+        <div class="insights-grid">
+          <div class="insight-item">
+            <span class="insight-eyebrow">Active Backlog</span>
+            <strong id="insight-backlog-games" class="insight-primary">—</strong>
+            <span id="insight-backlog-hours" class="insight-sub">—</span>
+          </div>
+
+          <div class="insight-item">
+            <div class="insight-eyebrow-row">
+              <span class="insight-eyebrow">Clearance Estimate</span>
+              <div class="pace-pills" role="group" aria-label="Weekly play pace">
+                <button type="button" class="pace-pill active" data-pace="5">5h/wk</button>
+                <button type="button" class="pace-pill" data-pace="10">10h/wk</button>
+                <button type="button" class="pace-pill" data-pace="15">15h/wk</button>
+              </div>
+            </div>
+            <strong id="insight-clear-time" class="insight-primary">—</strong>
+            <span id="insight-pace-note" class="insight-sub">At 5 hrs/week</span>
+          </div>
+
+          <div class="insight-item">
+            <span class="insight-eyebrow">Longest Unplayed Gem</span>
+            <button type="button" id="insight-neglected-btn" class="insight-link-btn" disabled>
+              <strong id="insight-neglected-name" class="insight-primary">—</strong>
             </button>
-            <span id="last-sync-time" class="last-sync-text" style="display: none;"></span>
-            <button id="settings-btn" class="settings-toggle-btn" title="Settings">
-              <i class="fa-solid fa-gear"></i>
+            <span id="insight-neglected-time" class="insight-sub">—</span>
+          </div>
+
+          <div class="insight-item insight-picker">
+            <div class="insight-eyebrow-row">
+              <span class="insight-eyebrow">What to Play Next</span>
+              <button type="button" id="suggest-next-btn" class="btn btn-subtle btn-xs">
+                <i class="fa-solid fa-dice"></i>
+                <span>Pick</span>
+              </button>
+            </div>
+            <button type="button" id="suggested-game-btn" class="insight-link-btn" hidden>
+              <strong id="suggested-game-name" class="insight-primary">—</strong>
             </button>
+            <span id="suggested-game-time" class="insight-sub">Weighted toward shorter unfinished games</span>
           </div>
         </div>
-      </header>
+      </section>
 
-      <main class="app-container">
-        <!-- LCD Stat Cards -->
-        <section class="stats-grid">
-          <div class="stat-card card-cyan">
-            <div class="stat-icon"><i class="fa-solid fa-gamepad"></i></div>
-            <div class="stat-info">
-              <p class="stat-label">Total Games</p>
-              <div class="lcd-screen">
-                <h3 id="stat-total-games" class="lcd-text">-</h3>
-              </div>
-            </div>
-            <div class="card-gel-glow"></div>
-          </div>
-          <div class="stat-card card-blue">
-            <div class="stat-icon"><i class="fa-solid fa-clock"></i></div>
-            <div class="stat-info">
-              <p class="stat-label">Hours Played</p>
-              <div class="lcd-screen">
-                <h3 id="stat-total-playtime" class="lcd-text">-</h3>
-              </div>
-            </div>
-            <div class="card-gel-glow"></div>
-          </div>
-          <div class="stat-card card-green">
-            <div class="stat-icon"><i class="fa-solid fa-people-group"></i></div>
-            <div class="stat-info">
-              <p class="stat-label">Shared Games</p>
-              <div class="lcd-screen">
-                <h3 id="stat-shared-games" class="lcd-text">-</h3>
-              </div>
-            </div>
-            <div class="card-gel-glow"></div>
-          </div>
-          <div class="stat-card card-pink">
-            <div class="stat-icon"><i class="fa-solid fa-trophy"></i></div>
-            <div class="stat-info">
-              <p class="stat-label">Games Completed</p>
-              <div class="lcd-screen">
-                <h3 id="stat-completed-games" class="lcd-text">-</h3>
-              </div>
-            </div>
-            <div class="card-gel-glow"></div>
-        </section>
+      <!-- Loading State -->
+      <section id="loading-view" class="state-card">
+        <div class="spinner" aria-hidden="true"></div>
+        <h2 id="loading-title">Loading your library</h2>
+        <p id="loading-subtitle">Reading local game cache...</p>
+      </section>
 
-        <!-- Backlog Insights Panel -->
-        <section id="insights-section" class="insights-section" style="display: none;">
-          <div class="insights-header">
-            <h3><i class="fa-solid fa-chart-line"></i> Backlog Insights &amp; Recommendations</h3>
-          </div>
-          <div class="insights-grid">
-            <div class="insights-card card-cyan">
-              <div class="insight-icon"><i class="fa-solid fa-hourglass-half"></i></div>
-              <div class="insight-info">
-                <span class="insight-label">Backlog Size</span>
-                <h4 id="insight-backlog-games">-</h4>
-                <p id="insight-backlog-hours">-</p>
-              </div>
-            </div>
-            
-            <div class="insights-card card-blue">
-              <div class="insight-icon"><i class="fa-solid fa-calendar-days"></i></div>
-              <div class="insight-info">
-                <span class="insight-label">Clearance Estimate</span>
-                <h4 id="insight-clear-time">-</h4>
-                <p>At 5 hrs/week average play</p>
-              </div>
-            </div>
+      <!-- Error / Setup State -->
+      <section id="error-view" class="state-card" hidden>
+        <div class="state-icon state-icon-warn"><i class="fa-solid fa-sliders"></i></div>
+        <h2 id="error-title">Connect Your Steam Account</h2>
+        <p id="error-message">Configure your Steam Web API Key and Steam ID to load your library and Family Sharing games.</p>
+        <div class="setup-steps">
+          <ol>
+            <li>Generate a Web API key at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a>.</li>
+            <li>Locate your 17-digit SteamID64 or custom vanity URL name.</li>
+            <li>Enter both in <strong>Settings</strong> and sync your library.</li>
+          </ol>
+        </div>
+        <div class="state-actions">
+          <button type="button" id="error-open-settings-btn" class="btn btn-primary">
+            <i class="fa-solid fa-gear"></i> Open Settings
+          </button>
+          <button type="button" id="error-retry-btn" class="btn btn-secondary">
+            <i class="fa-solid fa-rotate-right"></i> Retry
+          </button>
+        </div>
+      </section>
 
-            <div class="insights-card card-green">
-              <div class="insight-icon"><i class="fa-solid fa-gift"></i></div>
-              <div class="insight-info">
-                <span class="insight-label">Neglected Backlog Gem</span>
-                <h4 id="insight-neglected-name">-</h4>
-                <p id="insight-neglected-time">-</p>
-              </div>
-            </div>
-            
-            <!-- What Should I Play Next suggestion card -->
-            <div class="insights-card card-pink suggestion-card">
-              <div class="insight-icon"><i class="fa-solid fa-dice"></i></div>
-              <div class="insight-info">
-                <span class="insight-label">What to play next?</span>
-                <div class="suggestion-actions">
-                  <button id="suggest-next-btn" class="suggest-btn">Roll the Dice</button>
-                </div>
-                <div id="suggestion-result" class="suggestion-result" style="display: none;">
-                  <h4 id="suggested-game-name">-</h4>
-                  <p id="suggested-game-time">-</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Loader / Status -->
-        <section id="loading-view" class="status-view">
-          <div class="spinner"></div>
-          <h2 id="loading-title">Loading library...</h2>
-          <p id="loading-subtitle">Fetching games list from Steam API</p>
-          <div class="progress-bar-container" style="display: none;">
-            <div class="progress-bar-fill" id="hltb-progress-fill" style="width: 0%;"></div>
-          </div>
-          <p id="progress-text" style="display: none;">0/0 games analyzed</p>
-        </section>
-
-        <section id="error-view" class="status-view" style="display: none;">
-          <div class="error-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-          <h2>Configuration Required</h2>
-          <p id="error-message">Could not fetch Steam library. Please configure config.json with your Steam API Key and SteamID.</p>
-          <div class="help-box">
-            <h3>How to get started:</h3>
-            <ol>
-              <li>Open the file [config.json](file:///config.json) in the project directory.</li>
-              <li>Enter your <strong>STEAM_API_KEY</strong> (get it from <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a>).</li>
-              <li>Enter your <strong>STEAM_ID</strong> (17-digit numeric SteamID64, e.g., 76561198xxxxxxxx).</li>
-              <li>Save the file and refresh this page.</li>
-            </ol>
-          </div>
-          <button class="retry-btn" onclick="window.location.reload()"><i class="fa-solid fa-rotate-right"></i> Retry</button>
-        </section>
-
-        <!-- Library Section (with integrated controls) -->
-        <section id="library-section" style="display: none;">
-          <div class="section-header">
-            <h2 class="section-title">Games Library (<span id="visible-games-count">0</span>)</h2>
-            <div class="section-header-actions">
-              <button id="toggle-controls-btn" class="console-toggle-btn">
-                <i class="fa-solid fa-sliders"></i> Filters & Sort
-                <span class="toggle-led"></span>
+      <!-- Library Workspace -->
+      <section id="library-section" class="library-workspace" hidden>
+        <!-- Toolbar: Search + Quick Filters + Sort + Advanced -->
+        <div class="library-toolbar">
+          <div class="toolbar-primary">
+            <div class="search-field">
+              <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+              <input type="text" id="search-input" placeholder="Search library..." autocomplete="off" disabled>
+              <button type="button" id="search-clear-btn" class="search-clear-btn" aria-label="Clear search" hidden>
+                <i class="fa-solid fa-xmark"></i>
               </button>
-              <div class="sync-badge" id="hltb-sync-status" style="display: none;">
-                <i class="fa-solid fa-arrows-spin fa-spin"></i> HLTB syncing: <span id="hltb-sync-percent">0%</span>
+              <kbd class="search-kbd" aria-hidden="true">/</kbd>
+            </div>
+
+            <div class="toolbar-right">
+              <div class="select-field">
+                <label for="sort-select" class="sr-only">Sort games</label>
+                <select id="sort-select" disabled>
+                  <option value="playtime_desc">Playtime: High to Low</option>
+                  <option value="playtime_asc">Playtime: Low to High</option>
+                  <option value="name_asc">Title: A to Z</option>
+                  <option value="name_desc">Title: Z to A</option>
+                  <option value="hltb_main_asc">Main Story: Shortest</option>
+                  <option value="hltb_main_desc">Main Story: Longest</option>
+                  <option value="hltb_extra_asc">Main + Extra: Shortest</option>
+                  <option value="hltb_extra_desc">Main + Extra: Longest</option>
+                  <option value="hltb_completionist_asc">100% Completionist: Shortest</option>
+                  <option value="hltb_completionist_desc">100% Completionist: Longest</option>
+                </select>
+                <i class="fa-solid fa-chevron-down select-caret" aria-hidden="true"></i>
               </div>
+
+              <button type="button" id="toggle-advanced-btn" class="btn btn-secondary" aria-expanded="false" aria-controls="advanced-filters-drawer">
+                <i class="fa-solid fa-sliders"></i>
+                <span>Filters</span>
+                <span id="active-filter-count" class="count-pill" hidden>0</span>
+              </button>
             </div>
           </div>
 
-          <!-- Controls Console Panel (Collapsed by default) -->
-          <section class="controls-section collapsed">
-            <div class="search-bar-wrapper">
-              <i class="fa-solid fa-magnifying-glass search-icon"></i>
-              <input type="text" id="search-input" placeholder="Search games by title..." disabled>
-              <span class="scan-status-text">SYSTEM SCAN...</span>
+          <!-- Filter Chips + Count + Sync Pill -->
+          <div class="toolbar-secondary">
+            <div class="filter-pills" role="tablist" aria-label="Quick library filters">
+              <button type="button" class="filter-pill active" data-filter="all">All</button>
+              <button type="button" class="filter-pill" data-filter="owned">Owned</button>
+              <button type="button" class="filter-pill" data-filter="shared">Borrowed</button>
+              <button type="button" class="filter-pill" data-filter="in_progress">In Progress</button>
+              <button type="button" class="filter-pill" data-filter="unplayed">Unplayed</button>
+              <button type="button" class="filter-pill" data-filter="completed">Completed</button>
             </div>
 
-            <div class="filter-sort-wrapper">
-              <!-- Filters with Glowing LEDs -->
-              <div class="control-group">
-                <span class="control-label">Filter:</span>
-                <div class="filter-buttons">
-                  <button class="filter-btn active" data-filter="all">
-                    <span class="led-dot led-blue"></span>All
-                  </button>
-                  <button class="filter-btn" data-filter="owned">
-                    <span class="led-dot led-pink"></span>Owned
-                  </button>
-                  <button class="filter-btn" data-filter="shared">
-                    <span class="led-dot led-green"></span>Shared
-                  </button>
-                  <button class="filter-btn" data-filter="played">
-                    <span class="led-dot led-cyan"></span>Played
-                  </button>
-                  <button class="filter-btn" data-filter="unplayed">
-                    <span class="led-dot led-orange"></span>Unplayed
-                  </button>
-                  <button class="filter-btn" data-filter="completed">
-                    <span class="led-dot led-purple"></span>Completed
-                  </button>
-                </div>
-              </div>
+            <div class="toolbar-meta">
+              <span id="hltb-sync-status" class="sync-pill" hidden>
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span>HLTB <span id="hltb-sync-percent">0%</span></span>
+              </span>
+              <span class="results-counter"><strong id="visible-games-count">0</strong> titles</span>
+            </div>
+          </div>
 
-              <!-- Sorting -->
-              <div class="control-group">
-                <span class="control-label">Sort By:</span>
-                <div class="select-wrapper">
-                  <select id="sort-select" disabled>
-                    <option value="playtime_desc">Playtime (High to Low)</option>
-                    <option value="playtime_asc">Playtime (Low to High)</option>
-                    <option value="name_asc">Name (A to Z)</option>
-                    <option value="name_desc">Name (Z to A)</option>
-                    <option value="hltb_main_asc">HLTB Main Story (Shortest First)</option>
-                    <option value="hltb_main_desc">HLTB Main Story (Longest First)</option>
-                    <option value="hltb_completionist_asc">HLTB Completionist (Shortest First)</option>
-                    <option value="hltb_completionist_desc">HLTB Completionist (Longest First)</option>
+          <!-- Collapsible Advanced Filters Drawer -->
+          <div id="advanced-filters-drawer" class="advanced-drawer" hidden>
+            <div class="advanced-grid">
+              <div class="adv-field">
+                <label for="hltb-time-category">Length Category</label>
+                <div class="select-field compact">
+                  <select id="hltb-time-category" disabled>
+                    <option value="main">Main Story</option>
+                    <option value="extra">Main + Extra</option>
+                    <option value="completionist">100% Completionist</option>
                   </select>
+                  <i class="fa-solid fa-chevron-down select-caret" aria-hidden="true"></i>
                 </div>
               </div>
 
-              <!-- Time Range Filter -->
-              <div class="control-group">
-                <span class="control-label">Time to Beat (Hours):</span>
-                <div class="time-filter-wrapper">
-                  <div class="select-wrapper time-category-wrapper">
-                    <select id="hltb-time-category" disabled>
-                      <option value="main">Main Story</option>
-                      <option value="extra">Main + Extra</option>
-                      <option value="completionist">Completionist</option>
-                    </select>
-                  </div>
-                  <div class="time-inputs">
-                    <input type="number" id="hltb-min-time" class="time-input" placeholder="Min" min="0" step="0.5" disabled>
-                    <span class="time-separator">-</span>
-                    <input type="number" id="hltb-max-time" class="time-input" placeholder="Max" min="0" step="0.5" disabled>
-                  </div>
+              <div class="adv-field">
+                <label>Duration Range (Hours)</label>
+                <div class="range-inputs">
+                  <input type="number" id="hltb-min-time" placeholder="Min" min="0" step="0.5" disabled>
+                  <span class="range-dash">&ndash;</span>
+                  <input type="number" id="hltb-max-time" placeholder="Max" min="0" step="0.5" disabled>
                 </div>
               </div>
 
-              <!-- Checkbox Option -->
-              <div class="control-group">
-                <label class="checkbox-container">
+              <div class="adv-field">
+                <label for="genre-filter-select">Genre</label>
+                <div class="select-field compact">
+                  <select id="genre-filter-select" disabled>
+                    <option value="all">All Genres</option>
+                  </select>
+                  <i class="fa-solid fa-chevron-down select-caret" aria-hidden="true"></i>
+                </div>
+              </div>
+
+              <div class="adv-field adv-field-end">
+                <label class="checkbox-field">
                   <input type="checkbox" id="hide-zero-hours-checkbox" disabled>
-                  <span class="checkmark"></span>
-                  Hide 0h HLTB Games
+                  <span class="checkbox-box" aria-hidden="true"></span>
+                  <span>Hide games without HLTB times</span>
                 </label>
+
+                <button type="button" id="reset-filters-btn" class="btn btn-ghost btn-xs">
+                  Reset all
+                </button>
               </div>
             </div>
-          </section>
-          
-          <div class="games-grid" id="games-grid">
-            <!-- Game Cards will be dynamically injected here -->
           </div>
-        </section>
-      </main>
+        </div>
 
-    </div>
-
-    <!-- Right Grille panel -->
-    <div class="console-grille right-grille"></div>
+        <!-- Games Grid -->
+        <div class="games-grid" id="games-grid"></div>
+        <div id="scroll-sentinel" class="scroll-sentinel" aria-hidden="true"></div>
+      </section>
+    </main>
   </div>
 
   <!-- Settings Modal -->
-  <div id="settings-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-container">
+  <div id="settings-modal" class="modal-backdrop" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div class="modal-header">
-        <h2><i class="fa-solid fa-gear"></i> Settings</h2>
-        <button id="close-settings-btn" class="modal-close-btn">&times;</button>
+        <h2 id="settings-modal-title">Settings</h2>
+        <button type="button" id="close-settings-btn" class="btn-icon btn-icon-sm" aria-label="Close settings">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
-      <div class="modal-body">
-        <form id="settings-form">
-          <div class="form-group">
-            <label for="settings-api-key">Steam API Key</label>
-            <input type="password" id="settings-api-key" placeholder="Enter Steam Web API Key">
-            <small>Get your key from <a href="https://steamcommunity.com/dev/apikey" target="_blank">steamcommunity.com/dev/apikey</a></small>
+      <form id="settings-form" class="modal-body">
+        <div class="form-field">
+          <label for="settings-api-key">Steam Web API Key</label>
+          <input type="password" id="settings-api-key" placeholder="Enter your Steam Web API Key" autocomplete="off">
+          <span class="field-hint">Obtain one at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a></span>
+        </div>
+        <div class="form-field">
+          <label for="settings-steam-id">Primary Steam ID</label>
+          <input type="text" id="settings-steam-id" placeholder="17-digit SteamID64 or custom vanity URL" autocomplete="off">
+          <span class="field-hint">Accepts either numeric SteamID64 or custom profile name</span>
+        </div>
+        <div class="form-field">
+          <label for="settings-family-ids">Family Member Steam IDs <span class="label-optional">(Optional)</span></label>
+          <input type="text" id="settings-family-ids" placeholder="Comma-separated SteamIDs or vanity names" autocomplete="off">
+          <span class="field-hint">Merged automatically alongside Steam Families discovery</span>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="form-field">
+          <label>Themes &amp; Mix-and-Match Skins</label>
+          <span class="field-hint">Pick any theme now, or pair a Light skin and Dark skin for the header switch.</span>
+          <div class="theme-picker-grid" id="theme-picker-grid">
+            <div class="theme-picker-col">
+              <span class="theme-picker-heading"><i class="fa-solid fa-sun"></i> Light Mode Skin</span>
+              <button type="button" class="theme-option-card" data-theme-choice="ceramic" data-theme-polarity="light">
+                <span class="theme-swatch swatch-ceramic" aria-hidden="true"></span>
+                <span class="theme-option-meta">
+                  <strong>Wii Ceramic</strong>
+                  <span>Clean sky ceramic &amp; pinstripes (Default)</span>
+                </span>
+              </button>
+              <button type="button" class="theme-option-card" data-theme-choice="aero" data-theme-polarity="light">
+                <span class="theme-swatch swatch-aero" aria-hidden="true"></span>
+                <span class="theme-option-meta">
+                  <strong>Crystal Vista</strong>
+                  <span>Frutiger Aero glass, gel &amp; sunlit orbs</span>
+                </span>
+              </button>
+            </div>
+
+            <div class="theme-picker-col">
+              <span class="theme-picker-heading"><i class="fa-solid fa-moon"></i> Dark Mode Skin</span>
+              <button type="button" class="theme-option-card" data-theme-choice="obsidian" data-theme-polarity="dark">
+                <span class="theme-swatch swatch-obsidian" aria-hidden="true"></span>
+                <span class="theme-option-meta">
+                  <strong>Noir Editorial</strong>
+                  <span>Warm charcoal &amp; Newsreader serif (Default)</span>
+                </span>
+              </button>
+              <button type="button" class="theme-option-card" data-theme-choice="y2k" data-theme-polarity="dark">
+                <span class="theme-swatch swatch-y2k" aria-hidden="true"></span>
+                <span class="theme-option-meta">
+                  <strong>Cyber Chrome</strong>
+                  <span>Y2K smoky plastic, chrome &amp; LCDs</span>
+                </span>
+              </button>
+            </div>
           </div>
-          <div class="form-group">
-            <label for="settings-steam-id">Primary Steam ID</label>
-            <input type="text" id="settings-steam-id" placeholder="Enter SteamID64 or Custom Vanity URL">
-            <small>17-digit numeric ID or custom URL name (e.g. your username)</small>
-          </div>
-          <div class="form-group">
-            <label for="settings-family-ids">Family Member Steam IDs (comma separated, optional)</label>
-            <input type="text" id="settings-family-ids" placeholder="e.g. 76561198xxxxxxxx, username2">
-            <small>Configured family members will be merged automatically</small>
-          </div>
-          <div class="form-actions">
-            <button type="submit" id="save-settings-btn" class="sync-library-btn">Save Settings</button>
-          </div>
-        </form>
-      </div>
+        </div>
+
+        <div class="form-field">
+          <label class="checkbox-field">
+            <input type="checkbox" id="settings-sound-toggle" checked>
+            <span class="checkbox-box" aria-hidden="true"></span>
+            <span>Button sound effects</span>
+          </label>
+          <span class="field-hint">Warm Wii U&ndash;style button chimes tailored to each theme&rsquo;s mood</span>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="cancel-settings-btn" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="save-settings-btn" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- Sync Options Modal -->
-  <div id="sync-options-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-container">
+  <div id="sync-options-modal" class="modal-backdrop" hidden>
+    <div class="modal-dialog modal-sm" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title">
       <div class="modal-header">
-        <h2><i class="fa-solid fa-arrows-rotate"></i> Sync Library</h2>
-        <button id="close-sync-modal-btn" class="modal-close-btn">&times;</button>
+        <h2 id="sync-modal-title">Sync Steam Library</h2>
+        <button type="button" id="close-sync-modal-btn" class="btn-icon btn-icon-sm" aria-label="Close sync dialog">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
       <div class="modal-body">
-        <p style="margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.4; color: var(--text-primary);">
-          An existing database cache was found. How would you like to sync your library?
-        </p>
-        <div class="sync-options-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
-          <button id="quick-sync-btn" class="sync-option-choice-btn">
-            <strong><i class="fa-solid fa-bolt"></i> Quick Incremental Sync</strong>
-            <span>Quickly fetch new Steam games and query missing HLTB times without resetting your cache.</span>
+        <p class="modal-lead">Choose how to update your cached library and HowLongToBeat times.</p>
+        <div class="choice-stack">
+          <button type="button" id="quick-sync-btn" class="choice-card">
+            <div class="choice-icon"><i class="fa-solid fa-bolt"></i></div>
+            <div class="choice-text">
+              <strong>Quick Incremental Sync</strong>
+              <span>Import new Steam games, refresh playtimes, and query missing HLTB entries.</span>
+            </div>
           </button>
-          <button id="full-sync-btn" class="sync-option-choice-btn full-sync-choice">
-            <strong><i class="fa-solid fa-trash-can"></i> Force Full Refresh</strong>
-            <span>Completely delete the local database, reload your entire library, and fetch all HLTB data from scratch.</span>
+          <button type="button" id="full-sync-btn" class="choice-card choice-danger">
+            <div class="choice-icon"><i class="fa-solid fa-rotate"></i></div>
+            <div class="choice-text">
+              <strong>Force Full Refresh</strong>
+              <span>Rebuild your game list and re-query HLTB times from scratch.</span>
+            </div>
           </button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Game Detail Slide-out Panel -->
-  <div id="game-detail-panel" class="detail-panel">
-    <button id="close-detail-btn" class="detail-close-btn"><i class="fa-solid fa-xmark"></i></button>
-    <div class="detail-content">
-      <div class="detail-cover-wrapper">
-        <img id="detail-cover" src="" alt="Game Cover">
-        <div id="detail-playtime-badge" class="detail-playtime-badge">0 hrs</div>
+  <!-- HLTB Manual Re-match Modal -->
+  <div id="rematch-modal" class="modal-backdrop" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rematch-modal-title">
+      <div class="modal-header">
+        <h2 id="rematch-modal-title">Re-match HowLongToBeat</h2>
+        <button type="button" id="close-rematch-btn" class="btn-icon btn-icon-sm" aria-label="Close rematch dialog">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
-      <div class="detail-info-section">
-        <h2 id="detail-title">Game Title</h2>
-        <div id="detail-owner-badge" class="detail-owner-badge-container"></div>
-        
-        <div class="detail-stats-section">
-          <h3><i class="fa-solid fa-clock"></i> HowLongToBeat Stats</h3>
-          <div id="detail-hltb-loading" class="detail-hltb-loading" style="display: none;">
-            <i class="fa-solid fa-spinner fa-spin"></i> Loading...
-          </div>
-          <div id="detail-hltb-error" class="detail-hltb-error" style="display: none;">
-            <i class="fa-solid fa-triangle-exclamation"></i> Error loading times
-          </div>
-          <div id="detail-hltb-none" class="detail-hltb-none" style="display: none;">
-            <i class="fa-solid fa-circle-minus"></i> HLTB data not found
-          </div>
-          
-          <div id="detail-hltb-stats" class="detail-hltb-stats">
-            <div class="detail-progress-item">
-              <div class="progress-label-row">
-                <span>Main Story</span>
-                <span id="detail-time-main">0h</span>
-              </div>
-              <div class="progress-bar-bg">
-                <div id="detail-progress-main" class="progress-bar-fill main-fill" style="width: 0%;"></div>
-              </div>
-            </div>
-            
-            <div class="detail-progress-item">
-              <div class="progress-label-row">
-                <span>Main + Extra</span>
-                <span id="detail-time-extra">0h</span>
-              </div>
-              <div class="progress-bar-bg">
-                <div id="detail-progress-extra" class="progress-bar-fill extra-fill" style="width: 0%;"></div>
-              </div>
-            </div>
-            
-            <div class="detail-progress-item">
-              <div class="progress-label-row">
-                <span>100% Completionist</span>
-                <span id="detail-time-completionist">0h</span>
-              </div>
-              <div class="progress-bar-bg">
-                <div id="detail-progress-completionist" class="progress-bar-fill completionist-fill" style="width: 0%;"></div>
-              </div>
-            </div>
-          </div>
+      <div class="modal-body">
+        <p id="rematch-subtitle" class="modal-lead">Select the correct HowLongToBeat entry for this game.</p>
+        <div class="rematch-search-bar">
+          <input type="text" id="rematch-search-input" placeholder="Search HowLongToBeat title...">
+          <button type="button" id="rematch-search-btn" class="btn btn-primary">Search</button>
         </div>
-        
-        <div class="detail-actions">
-          <a id="detail-steam-link" href="#" target="_blank" class="detail-action-btn steam-btn"><i class="fa-brands fa-steam"></i> Steam Store</a>
-          <a id="detail-hltb-link" href="#" target="_blank" class="detail-action-btn hltb-btn"><i class="fa-solid fa-circle-info"></i> HowLongToBeat</a>
-        </div>
+        <div id="rematch-results" class="rematch-results"></div>
       </div>
     </div>
   </div>
-  <div id="panel-overlay" class="panel-overlay"></div>
+
+  <!-- Game Detail Slide-over Drawer -->
+  <aside id="game-detail-panel" class="detail-drawer" aria-hidden="true">
+    <button type="button" id="close-detail-btn" class="drawer-close-btn" aria-label="Close details">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+    <div class="drawer-scroll">
+      <div class="drawer-hero">
+        <img id="detail-cover" src="" alt="">
+        <div id="detail-cover-fallback" class="drawer-hero-fallback" hidden></div>
+        <span id="detail-playtime-badge" class="hero-playtime">0.0h played</span>
+      </div>
+
+      <div class="drawer-body">
+        <div class="drawer-title-block">
+          <h2 id="detail-title">Game Title</h2>
+          <div class="drawer-badges" id="detail-badges"></div>
+        </div>
+
+        <button type="button" id="detail-beat-toggle-btn" class="btn btn-secondary btn-full">
+          <i class="fa-solid fa-check"></i>
+          <span>Mark as Beaten</span>
+        </button>
+
+        <section class="drawer-section">
+          <div class="drawer-section-head">
+            <h3>HowLongToBeat</h3>
+            <div class="drawer-inline-actions">
+              <button type="button" id="detail-rematch-btn" class="text-action-btn" title="Choose a different HLTB entry">Re-match</button>
+              <button type="button" id="detail-refresh-btn" class="text-action-btn" title="Force fetch latest HLTB times">Refresh</button>
+            </div>
+          </div>
+
+          <div id="detail-hltb-state" class="drawer-hltb-empty" hidden></div>
+
+          <div id="detail-hltb-stats" class="drawer-bars">
+            <div class="bar-row">
+              <div class="bar-meta">
+                <span>Main Story</span>
+                <strong id="detail-time-main">—</strong>
+              </div>
+              <div class="bar-track"><div id="detail-progress-main" class="bar-fill fill-main"></div></div>
+            </div>
+
+            <div class="bar-row">
+              <div class="bar-meta">
+                <span>Main + Extra</span>
+                <strong id="detail-time-extra">—</strong>
+              </div>
+              <div class="bar-track"><div id="detail-progress-extra" class="bar-fill fill-extra"></div></div>
+            </div>
+
+            <div class="bar-row">
+              <div class="bar-meta">
+                <span>100% Completionist</span>
+                <strong id="detail-time-completionist">—</strong>
+              </div>
+              <div class="bar-track"><div id="detail-progress-completionist" class="bar-fill fill-comp"></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="detail-meta-section" class="drawer-section" hidden>
+          <h3>Details</h3>
+          <dl class="meta-list">
+            <div id="detail-meta-genre-row"><dt>Genres</dt><dd id="detail-meta-genres">—</dd></div>
+            <div id="detail-meta-dev-row"><dt>Developer</dt><dd id="detail-meta-dev">—</dd></div>
+            <div id="detail-meta-year-row"><dt>Released</dt><dd id="detail-meta-year">—</dd></div>
+          </dl>
+        </section>
+
+        <div class="drawer-links">
+          <a id="detail-steam-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-full">
+            <i class="fa-brands fa-steam"></i> Open in Steam
+          </a>
+          <a id="detail-hltb-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-full">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> HowLongToBeat
+          </a>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <div id="panel-overlay" class="drawer-overlay" hidden></div>
+
+  <!-- Non-blocking Toast Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <script src="/js/app.js"></script>
 </body>

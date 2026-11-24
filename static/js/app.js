@@ -1,1642 +1,1927 @@
-// State Management
-let games = [];
-let filteredGames = [];
-let currentFilter = 'all';
-let currentSort = 'playtime_desc';
-let hltbSyncQueue = [];
-let activeSyncWorkers = 0;
-const MAX_CONCURRENT_SYNC = 4; // limit concurrent HLTB requests to avoid throttling
-let visibleCardCount = 40;
-const BATCH_SIZE = 40;
+(() => {
+  'use strict';
 
-// Mobile Environment Detection
-const isMobileApp = typeof window !== 'undefined' && window.Capacitor !== undefined && window.Capacitor.Plugins !== undefined && window.Capacitor.Plugins.Preferences !== undefined;
+  // ==========================================================================
+  // STATE
+  // ==========================================================================
 
-// Native Preference Storage Helpers for Mobile
-async function getMobileConfig() {
-  if (!isMobileApp) return null;
-  const { Preferences } = window.Capacitor.Plugins;
-  try {
-    const { value } = await Preferences.get({ key: 'config' });
-    return value ? JSON.parse(value) : null;
-  } catch (err) {
-    console.error('Error reading mobile config:', err);
-    return null;
-  }
-}
+  const BATCH_SIZE = 48;
+  const MAX_CONCURRENT_SYNC = 4;
 
-async function saveMobileConfig(config) {
-  if (!isMobileApp) return;
-  const { Preferences } = window.Capacitor.Plugins;
-  await Preferences.set({
-    key: 'config',
-    value: JSON.stringify(config)
-  });
-}
-
-async function getMobileLibrary() {
-  if (!isMobileApp) return { games: [], lastSync: 0 };
-  const { Preferences } = window.Capacitor.Plugins;
-  try {
-    const { value } = await Preferences.get({ key: 'library' });
-    return value ? JSON.parse(value) : { games: [], lastSync: 0 };
-  } catch (err) {
-    console.error('Error reading mobile library:', err);
-    return { games: [], lastSync: 0 };
-  }
-}
-
-async function saveMobileLibrary(libraryData) {
-  if (!isMobileApp) return;
-  const { Preferences } = window.Capacitor.Plugins;
-  await Preferences.set({
-    key: 'library',
-    value: JSON.stringify(libraryData)
-  });
-}
-
-// CJK / Punctuation / Digit-boundary cleaner for mobile search queries
-function cleanGameTitleForSearch(title) {
-  if (!title) return '';
-  let cleaned = title.toLowerCase().trim();
-  const hasAscii = /[a-z0-9]/.test(cleaned);
-  const hasNonAscii = /[^\x00-\x7F]/.test(cleaned);
-  if (hasAscii && hasNonAscii) {
-    cleaned = cleaned.replace(/[^\x00-\x7F]/g, ' ');
-  }
-  cleaned = cleaned.replace(/[™®©\-–—/\\_.,]/g, ' ');
-  cleaned = cleaned.replace(/\([^)]*\)/g, '');
-  if (cleaned.includes(':')) {
-    cleaned = cleaned.split(':')[0];
-  }
-  cleaned = cleaned.replace(/([a-z])([0-9])/g, '$1 $2');
-  cleaned = cleaned.replace(/([0-9])([a-z])/g, '$1 $2');
-  cleaned = cleaned.replace(/\s+/g, ' ');
-  return cleaned.trim();
-}
-
-// Mobile-specific HLTB query executor
-async function scrapeHltbMobile(gameName) {
-  if (!isMobileApp) return null;
-  const { CapacitorHttp } = window.Capacitor.Plugins;
-  const now = Date.now();
-  const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-  
-  try {
-    const initUrl = `https://howlongtobeat.com/api/bleed/init?t=${now}`;
-    const initRes = await CapacitorHttp.get({
-      url: initUrl,
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Referer': 'https://howlongtobeat.com/',
-        'Origin': 'https://howlongtobeat.com'
-      }
-    });
-    if (initRes.status !== 200 || !initRes.data) return null;
-    
-    const auth = initRes.data;
-    const searchTerms = gameName.trim().split(' ');
-    const payload = {
-      searchType: "games",
-      searchTerms: searchTerms,
-      searchPage: 1,
-      size: 20,
-      searchOptions: {
-        games: {
-          userId: 0,
-          platform: "",
-          sortCategory: "popular",
-          rangeCategory: "main",
-          rangeTime: { min: 0, max: 0 },
-          gameplay: { perspective: "", flow: "", genre: "", difficulty: "" },
-          rangeYear: { min: "", max: "" },
-          modifier: ""
-        },
-        users: { sortCategory: "postcount" },
-        lists: { sortCategory: "follows" },
-        filter: "",
-        sort: 0,
-        randomizer: 0
-      },
-      useCache: true
-    };
-    
-    if (auth.hpKey) {
-      payload[auth.hpKey] = auth.hpVal;
-    }
-    
-    const queryRes = await CapacitorHttp.post({
-      url: "https://howlongtobeat.com/api/bleed",
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Content-Type': 'application/json',
-        'Origin': 'https://howlongtobeat.com',
-        'Referer': 'https://howlongtobeat.com/',
-        'x-auth-token': auth.token,
-        'x-hp-key': auth.hpKey,
-        'x-hp-val': auth.hpVal
-      },
-      data: payload
-    });
-    
-    if (queryRes.status !== 200 || !queryRes.data) return null;
-    return queryRes.data.data || [];
-  } catch (err) {
-    console.error('Mobile HLTB query error:', err);
-    return null;
-  }
-}
-
-// Mobile-specific local sync processor
-async function performMobileSync(force) {
-  if (!isMobileApp) return null;
-  const { Preferences, CapacitorHttp } = window.Capacitor.Plugins;
-  
-  const config = await getMobileConfig();
-  if (!config || !config.STEAM_API_KEY || !config.STEAM_ID) {
-    throw new Error('Steam API Key or Steam ID is missing in settings.');
-  }
-  
-  const apiKey = config.STEAM_API_KEY;
-  let primaryId = config.STEAM_ID;
-  const familyIds = config.FAMILY_STEAM_IDS || [];
-  
-  if (isNaN(primaryId)) {
-    const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${primaryId}`;
-    const resolveRes = await CapacitorHttp.get({ url: resolveUrl });
-    if (resolveRes.status === 200 && resolveRes.data && resolveRes.data.response && resolveRes.data.response.steamid) {
-      primaryId = resolveRes.data.response.steamid;
-    } else {
-      throw new Error('Failed to resolve Steam Vanity URL.');
-    }
-  }
-  
-  const fetchGames = async (steamId) => {
-    const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamId}&include_appinfo=true&include_played_free_games=true&format=json`;
-    const response = await CapacitorHttp.get({ url });
-    if (response.status !== 200) {
-      throw new Error(`Failed to fetch games for SteamID ${steamId}`);
-    }
-    return response.data?.response?.games || [];
+  const state = {
+    games: [],
+    gamesById: new Map(),
+    filteredGames: [],
+    manualBeaten: new Set(),
+    manualUnbeaten: new Set(),
+    filter: 'all',
+    sort: 'playtime_desc',
+    search: '',
+    timeCategory: 'main',
+    minTime: null,
+    maxTime: null,
+    genre: 'all',
+    hideZero: false,
+    weeklyPace: 5,
+    visibleCount: BATCH_SIZE,
+    activeDetailAppId: null,
+    lastSync: 0,
+    syncQueue: [],
+    activeWorkers: 0,
+    syncTotal: 0,
+    syncDone: 0
   };
-  
-  const primaryGames = await fetchGames(primaryId);
-  const gamesMap = new Map();
-  for (const game of primaryGames) {
-    gamesMap.set(game.appid, {
-      appid: game.appid,
-      name: game.name,
-      playtime_forever: game.playtime_forever || 0,
-      img_icon_url: game.img_icon_url || '',
-      owner_steamid: primaryId,
-      is_owned: true,
-      source: 'primary'
-    });
+
+  // Endless / utility blocklist for backlog calculations & dice picker
+  const ENDLESS_BLOCKLIST = [
+    'team fortress 2', 'counter-strike', 'dota 2', 'pubg', 'apex legends',
+    'destiny 2', 'warframe', 'rust', "garry's mod", 'left 4 dead',
+    'dead by daylight', 'payday 2', 'payday 3', 'valorant', 'league of legends',
+    'world of warcraft', 'overwatch', 'teamfight tactics', 'hearthstone',
+    'brawlhalla', 'rocket league', 'smite', 'paladins', 'vrchat',
+    'factorio', 'satisfactory', 'rimworld', 'civilization', 'hearts of iron',
+    'stellaris', 'crusader kings', 'europa universalis', 'the sims',
+    'cities: skylines', 'euro truck simulator', 'american truck simulator',
+    'assetto corsa', 'iracing', 'killing floor'
+  ];
+
+  const NON_STORY_KEYWORDS = [
+    'dedicated server', 'test server', 'public test', 'benchmark',
+    'soundtrack', 'sdk', 'wallpaper engine'
+  ];
+
+  // ==========================================================================
+  // DOM REFERENCES
+  // ==========================================================================
+
+  const el = {
+    themeToggle: document.getElementById('theme-toggle'),
+    configStatus: document.getElementById('config-status'),
+    lastSyncTime: document.getElementById('last-sync-time'),
+    syncBtn: document.getElementById('sync-btn'),
+    settingsBtn: document.getElementById('settings-btn'),
+
+    statTotalGames: document.getElementById('stat-total-games'),
+    statTotalPlaytime: document.getElementById('stat-total-playtime'),
+    statSharedGames: document.getElementById('stat-shared-games'),
+    statCompletedGames: document.getElementById('stat-completed-games'),
+
+    insightsSection: document.getElementById('insights-section'),
+    insightBacklogGames: document.getElementById('insight-backlog-games'),
+    insightBacklogHours: document.getElementById('insight-backlog-hours'),
+    insightClearTime: document.getElementById('insight-clear-time'),
+    insightPaceNote: document.getElementById('insight-pace-note'),
+    insightNeglectedBtn: document.getElementById('insight-neglected-btn'),
+    insightNeglectedName: document.getElementById('insight-neglected-name'),
+    insightNeglectedTime: document.getElementById('insight-neglected-time'),
+    suggestNextBtn: document.getElementById('suggest-next-btn'),
+    suggestedGameBtn: document.getElementById('suggested-game-btn'),
+    suggestedGameName: document.getElementById('suggested-game-name'),
+    suggestedGameTime: document.getElementById('suggested-game-time'),
+    pacePills: document.querySelectorAll('.pace-pill'),
+
+    loadingView: document.getElementById('loading-view'),
+    loadingTitle: document.getElementById('loading-title'),
+    loadingSubtitle: document.getElementById('loading-subtitle'),
+    errorView: document.getElementById('error-view'),
+    errorTitle: document.getElementById('error-title'),
+    errorMessage: document.getElementById('error-message'),
+    errorOpenSettingsBtn: document.getElementById('error-open-settings-btn'),
+    errorRetryBtn: document.getElementById('error-retry-btn'),
+
+    librarySection: document.getElementById('library-section'),
+    searchInput: document.getElementById('search-input'),
+    searchClearBtn: document.getElementById('search-clear-btn'),
+    sortSelect: document.getElementById('sort-select'),
+    toggleAdvancedBtn: document.getElementById('toggle-advanced-btn'),
+    activeFilterCount: document.getElementById('active-filter-count'),
+    advancedDrawer: document.getElementById('advanced-filters-drawer'),
+    filterPills: document.querySelectorAll('.filter-pill'),
+    hltbTimeCategory: document.getElementById('hltb-time-category'),
+    hltbMinTime: document.getElementById('hltb-min-time'),
+    hltbMaxTime: document.getElementById('hltb-max-time'),
+    genreSelect: document.getElementById('genre-filter-select'),
+    hideZeroCheckbox: document.getElementById('hide-zero-hours-checkbox'),
+    resetFiltersBtn: document.getElementById('reset-filters-btn'),
+    hltbSyncStatus: document.getElementById('hltb-sync-status'),
+    hltbSyncPercent: document.getElementById('hltb-sync-percent'),
+    visibleGamesCount: document.getElementById('visible-games-count'),
+    gamesGrid: document.getElementById('games-grid'),
+    scrollSentinel: document.getElementById('scroll-sentinel'),
+
+    settingsModal: document.getElementById('settings-modal'),
+    closeSettingsBtn: document.getElementById('close-settings-btn'),
+    cancelSettingsBtn: document.getElementById('cancel-settings-btn'),
+    settingsForm: document.getElementById('settings-form'),
+    settingsApiKey: document.getElementById('settings-api-key'),
+    settingsSteamId: document.getElementById('settings-steam-id'),
+    settingsFamilyIds: document.getElementById('settings-family-ids'),
+    themePickerGrid: document.getElementById('theme-picker-grid'),
+    settingsSoundToggle: document.getElementById('settings-sound-toggle'),
+    saveSettingsBtn: document.getElementById('save-settings-btn'),
+
+    syncModal: document.getElementById('sync-options-modal'),
+    closeSyncModalBtn: document.getElementById('close-sync-modal-btn'),
+    quickSyncBtn: document.getElementById('quick-sync-btn'),
+    fullSyncBtn: document.getElementById('full-sync-btn'),
+
+    rematchModal: document.getElementById('rematch-modal'),
+    closeRematchBtn: document.getElementById('close-rematch-btn'),
+    rematchSubtitle: document.getElementById('rematch-subtitle'),
+    rematchSearchInput: document.getElementById('rematch-search-input'),
+    rematchSearchBtn: document.getElementById('rematch-search-btn'),
+    rematchResults: document.getElementById('rematch-results'),
+
+    detailPanel: document.getElementById('game-detail-panel'),
+    panelOverlay: document.getElementById('panel-overlay'),
+    closeDetailBtn: document.getElementById('close-detail-btn'),
+    detailCover: document.getElementById('detail-cover'),
+    detailCoverFallback: document.getElementById('detail-cover-fallback'),
+    detailPlaytimeBadge: document.getElementById('detail-playtime-badge'),
+    detailTitle: document.getElementById('detail-title'),
+    detailBadges: document.getElementById('detail-badges'),
+    detailBeatToggleBtn: document.getElementById('detail-beat-toggle-btn'),
+    detailRematchBtn: document.getElementById('detail-rematch-btn'),
+    detailRefreshBtn: document.getElementById('detail-refresh-btn'),
+    detailHltbState: document.getElementById('detail-hltb-state'),
+    detailHltbStats: document.getElementById('detail-hltb-stats'),
+    detailTimeMain: document.getElementById('detail-time-main'),
+    detailTimeExtra: document.getElementById('detail-time-extra'),
+    detailTimeComp: document.getElementById('detail-time-completionist'),
+    detailProgressMain: document.getElementById('detail-progress-main'),
+    detailProgressExtra: document.getElementById('detail-progress-extra'),
+    detailProgressComp: document.getElementById('detail-progress-completionist'),
+    detailMetaSection: document.getElementById('detail-meta-section'),
+    detailMetaGenres: document.getElementById('detail-meta-genres'),
+    detailMetaDev: document.getElementById('detail-meta-dev'),
+    detailMetaYear: document.getElementById('detail-meta-year'),
+    detailMetaGenreRow: document.getElementById('detail-meta-genre-row'),
+    detailMetaDevRow: document.getElementById('detail-meta-dev-row'),
+    detailMetaYearRow: document.getElementById('detail-meta-year-row'),
+    detailSteamLink: document.getElementById('detail-steam-link'),
+    detailHltbLink: document.getElementById('detail-hltb-link'),
+
+    toastContainer: document.getElementById('toast-container')
+  };
+
+  // ==========================================================================
+  // UTILITIES
+  // ==========================================================================
+
+  function escapeHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
-  
-  for (const memberId of familyIds) {
-    let resolvedMemberId = memberId;
-    if (isNaN(memberId)) {
-      const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${memberId}`;
-      const resolveRes = await CapacitorHttp.get({ url: resolveUrl });
-      if (resolveRes.status === 200 && resolveRes.data?.response?.steamid) {
-        resolvedMemberId = resolveRes.data.response.steamid;
+
+  function debounce(fn, delay) {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  function throttle(fn, wait) {
+    let last = 0;
+    let timer = null;
+    return (...args) => {
+      const now = Date.now();
+      const remaining = wait - (now - last);
+      if (remaining <= 0) {
+        clearTimeout(timer);
+        timer = null;
+        last = now;
+        fn(...args);
+      } else if (!timer) {
+        timer = setTimeout(() => {
+          last = Date.now();
+          timer = null;
+          fn(...args);
+        }, remaining);
       }
+    };
+  }
+
+  function showToast(message, type = 'info') {
+    const icon = type === 'success'
+      ? 'fa-circle-check'
+      : type === 'error'
+        ? 'fa-circle-exclamation'
+        : 'fa-circle-info';
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<i class="fa-solid ${icon}"></i><span>${escapeHtml(message)}</span>`;
+    el.toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(6px)';
+      toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+      setTimeout(() => toast.remove(), 220);
+    }, 3200);
+  }
+
+  function formatRelativeSync(timestamp) {
+    if (!timestamp) return '';
+    const diffSec = Math.floor((Date.now() - timestamp) / 1000);
+    if (diffSec < 60) return 'Synced just now';
+    if (diffSec < 3600) return `Synced ${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `Synced ${Math.floor(diffSec / 3600)}h ago`;
+    return `Synced ${new Date(timestamp).toLocaleDateString()}`;
+  }
+
+  function isEndlessOrUtility(name) {
+    const lower = String(name || '').toLowerCase().trim();
+    if (ENDLESS_BLOCKLIST.some(b => lower === b || lower.includes(b))) return true;
+    return NON_STORY_KEYWORDS.some(k => lower.includes(k));
+  }
+
+  function isGameBeaten(game) {
+    if (state.manualUnbeaten.has(game.appid)) return false;
+    if (state.manualBeaten.has(game.appid)) return true;
+    if (!game.hltb || game.hltb.notFound) return false;
+    const playHrs = (game.playtime_forever || 0) / 60;
+    const mainHrs = game.hltb.gameplayMain || 0;
+    return playHrs > 0 && mainHrs > 0 && playHrs >= mainHrs;
+  }
+
+  function hasHltbHours(hltb) {
+    if (!hltb || hltb.notFound) return false;
+    return (hltb.gameplayMain || 0) > 0 || (hltb.gameplayMainExtra || 0) > 0 || (hltb.gameplayCompletionist || 0) > 0;
+  }
+
+  function setControlsEnabled(enabled) {
+    el.searchInput.disabled = !enabled;
+    el.sortSelect.disabled = !enabled;
+    el.hltbTimeCategory.disabled = !enabled;
+    el.hltbMinTime.disabled = !enabled;
+    el.hltbMaxTime.disabled = !enabled;
+    el.genreSelect.disabled = !enabled;
+    el.hideZeroCheckbox.disabled = !enabled;
+    syncAllCustomSelects();
+  }
+
+  function setStatusPill(status, label) {
+    el.configStatus.className = `status-pill status-${status}`;
+    el.configStatus.querySelector('.status-label').textContent = label;
+  }
+
+  // ==========================================================================
+  // WEB AUDIO SOUND ENGINE (Buttons-Only, Wii U-Inspired Mood Profiles)
+  // ==========================================================================
+
+  const SoundFX = (() => {
+    let ctx = null;
+    let enabled = localStorage.getItem('soundEnabled') !== 'false';
+    let lastHoverAt = 0;
+    let hoverToggle = false;
+
+    function getTheme() {
+      return document.documentElement.getAttribute('data-theme') || 'ceramic';
     }
-    
-    try {
-      const memberGames = await fetchGames(resolvedMemberId);
-      for (const game of memberGames) {
-        if (!gamesMap.has(game.appid)) {
-          gamesMap.set(game.appid, {
-            appid: game.appid,
-            name: game.name,
-            playtime_forever: 0,
-            img_icon_url: game.img_icon_url || '',
-            owner_steamid: resolvedMemberId,
-            is_owned: false,
-            source: 'family_manual'
-          });
+
+    function ensureContext(allowCreate = true) {
+      if (!enabled) return null;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      if (!ctx && allowCreate) ctx = new AudioCtx();
+      if (ctx && ctx.state === 'suspended' && allowCreate) {
+        ctx.resume().catch(() => {});
+      }
+      return ctx;
+    }
+
+    // Warm filtered voice: soft rounded attack, smooth exponential tail, gentle 2nd harmonic
+    function note(ac, {
+      freq = 660,
+      endFreq = null,
+      dur = 0.11,
+      gain = 0.07,
+      delay = 0,
+      cutoff = 2400,
+      type = 'sine',
+      overtone = 0.18
+    } = {}) {
+      const now = ac.currentTime + delay;
+      const filter = ac.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(cutoff, now);
+      filter.Q.setValueAtTime(0.7, now);
+
+      const env = ac.createGain();
+      env.gain.setValueAtTime(0.0001, now);
+      env.gain.linearRampToValueAtTime(gain, now + 0.014);
+      env.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+      const osc1 = ac.createOscillator();
+      osc1.type = type;
+      osc1.frequency.setValueAtTime(freq, now);
+      if (endFreq) {
+        osc1.frequency.exponentialRampToValueAtTime(Math.max(40, endFreq), now + dur * 0.85);
+      }
+      osc1.connect(filter);
+
+      if (overtone > 0) {
+        const osc2 = ac.createOscillator();
+        const g2 = ac.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(freq * 2, now);
+        if (endFreq) {
+          osc2.frequency.exponentialRampToValueAtTime(Math.max(80, endFreq * 2), now + dur * 0.85);
+        }
+        g2.gain.setValueAtTime(overtone, now);
+        osc2.connect(g2);
+        g2.connect(filter);
+        osc2.start(now);
+        osc2.stop(now + dur + 0.02);
+      }
+
+      filter.connect(env);
+      env.connect(ac.destination);
+      osc1.start(now);
+      osc1.stop(now + dur + 0.02);
+    }
+
+    const PROFILES = {
+      // Wii Ceramic: sunny Nintendo Wii U Menu ceramic marimba & porcelain
+      ceramic: {
+        hover(ac, shift) {
+          note(ac, { freq: 520 * shift, endFreq: 640 * shift, dur: 0.042, gain: 0.017, cutoff: 1550, overtone: 0.08 });
+        },
+        cardHover(ac, shift) {
+          note(ac, { freq: 440 * shift, endFreq: 510 * shift, dur: 0.036, gain: 0.012, cutoff: 1250, overtone: 0.05 });
+        },
+        primary(ac) {
+          note(ac, { freq: 587.33, dur: 0.11, gain: 0.065, cutoff: 2300, overtone: 0.2 });
+          note(ac, { freq: 880.00, dur: 0.16, gain: 0.055, delay: 0.048, cutoff: 2500, overtone: 0.15 });
+        },
+        secondary(ac) {
+          note(ac, { freq: 659.25, endFreq: 783.99, dur: 0.095, gain: 0.05, cutoff: 2200, overtone: 0.14 });
+        },
+        tab(ac) {
+          note(ac, { freq: 783.99, dur: 0.075, gain: 0.042, cutoff: 2100, overtone: 0.12 });
+        },
+        back(ac) {
+          note(ac, { freq: 783.99, dur: 0.09, gain: 0.05, cutoff: 2100, overtone: 0.14 });
+          note(ac, { freq: 523.25, dur: 0.14, gain: 0.05, delay: 0.05, cutoff: 1900, overtone: 0.1 });
+        },
+        toggle(ac) {
+          note(ac, { freq: 523.25, dur: 0.12, gain: 0.05, cutoff: 2400, overtone: 0.16 });
+          note(ac, { freq: 659.25, dur: 0.14, gain: 0.05, delay: 0.055, cutoff: 2400, overtone: 0.16 });
+          note(ac, { freq: 783.99, dur: 0.19, gain: 0.052, delay: 0.11, cutoff: 2600, overtone: 0.18 });
+        }
+      },
+
+      // Crystal Vista (Frutiger Aero): aquatic glass bells & eShop crystal chimes
+      aero: {
+        hover(ac, shift) {
+          note(ac, { freq: 660 * shift, endFreq: 860 * shift, dur: 0.048, gain: 0.017, cutoff: 2100, overtone: 0.14 });
+        },
+        cardHover(ac, shift) {
+          note(ac, { freq: 560 * shift, endFreq: 710 * shift, dur: 0.042, gain: 0.012, cutoff: 1700, overtone: 0.09 });
+        },
+        primary(ac) {
+          note(ac, { freq: 659.25, endFreq: 783.99, dur: 0.13, gain: 0.06, cutoff: 3200, overtone: 0.24 });
+          note(ac, { freq: 1174.66, dur: 0.21, gain: 0.048, delay: 0.045, cutoff: 3600, overtone: 0.18 });
+        },
+        secondary(ac) {
+          note(ac, { freq: 493.88, endFreq: 739.99, dur: 0.11, gain: 0.052, cutoff: 3000, overtone: 0.2 });
+        },
+        tab(ac) {
+          note(ac, { freq: 880.00, endFreq: 1046.50, dur: 0.09, gain: 0.044, cutoff: 3100, overtone: 0.18 });
+        },
+        back(ac) {
+          note(ac, { freq: 880.00, dur: 0.1, gain: 0.048, cutoff: 2800, overtone: 0.18 });
+          note(ac, { freq: 587.33, dur: 0.16, gain: 0.048, delay: 0.05, cutoff: 2500, overtone: 0.14 });
+        },
+        toggle(ac) {
+          note(ac, { freq: 587.33, dur: 0.14, gain: 0.048, cutoff: 3200, overtone: 0.22 });
+          note(ac, { freq: 739.99, dur: 0.16, gain: 0.048, delay: 0.055, cutoff: 3300, overtone: 0.22 });
+          note(ac, { freq: 880.00, dur: 0.18, gain: 0.048, delay: 0.11, cutoff: 3400, overtone: 0.22 });
+          note(ac, { freq: 1174.66, dur: 0.26, gain: 0.045, delay: 0.165, cutoff: 3600, overtone: 0.2 });
+        }
+      },
+
+      // Noir Editorial (Dark Default): warm muted felt-piano / quiet late-night study key
+      obsidian: {
+        hover(ac, shift) {
+          note(ac, { freq: 245 * shift, endFreq: 205 * shift, dur: 0.036, gain: 0.015, cutoff: 760, overtone: 0.04 });
+        },
+        cardHover(ac, shift) {
+          note(ac, { freq: 210 * shift, endFreq: 185 * shift, dur: 0.032, gain: 0.011, cutoff: 620, overtone: 0.02 });
+        },
+        primary(ac) {
+          note(ac, { freq: 293.66, dur: 0.12, gain: 0.055, cutoff: 1100, overtone: 0.1 });
+          note(ac, { freq: 440.00, dur: 0.16, gain: 0.048, delay: 0.05, cutoff: 1200, overtone: 0.08 });
+        },
+        secondary(ac) {
+          note(ac, { freq: 329.63, endFreq: 293.66, dur: 0.085, gain: 0.045, cutoff: 1000, overtone: 0.08 });
+        },
+        tab(ac) {
+          note(ac, { freq: 392.00, dur: 0.07, gain: 0.038, cutoff: 980, overtone: 0.06 });
+        },
+        back(ac) {
+          note(ac, { freq: 440.00, dur: 0.09, gain: 0.042, cutoff: 1050, overtone: 0.08 });
+          note(ac, { freq: 293.66, dur: 0.14, gain: 0.042, delay: 0.05, cutoff: 900, overtone: 0.06 });
+        },
+        toggle(ac) {
+          note(ac, { freq: 293.66, dur: 0.14, gain: 0.045, cutoff: 1100, overtone: 0.08 });
+          note(ac, { freq: 349.23, dur: 0.16, gain: 0.045, delay: 0.06, cutoff: 1150, overtone: 0.08 });
+          note(ac, { freq: 440.00, dur: 0.2, gain: 0.045, delay: 0.12, cutoff: 1200, overtone: 0.1 });
+        }
+      },
+
+      // Cyber Chrome (Y2K): sleek rounded console glass-synth & holographic chimes
+      y2k: {
+        hover(ac, shift) {
+          note(ac, { freq: 470 * shift, endFreq: 575 * shift, dur: 0.036, gain: 0.015, cutoff: 1650, type: 'sine', overtone: 0.06 });
+        },
+        cardHover(ac, shift) {
+          note(ac, { freq: 380 * shift, endFreq: 455 * shift, dur: 0.032, gain: 0.011, cutoff: 1350, type: 'sine', overtone: 0.04 });
+        },
+        primary(ac) {
+          note(ac, { freq: 523.25, dur: 0.11, gain: 0.05, cutoff: 2600, type: 'triangle', overtone: 0.14 });
+          note(ac, { freq: 987.77, dur: 0.18, gain: 0.044, delay: 0.045, cutoff: 2800, type: 'sine', overtone: 0.2 });
+        },
+        secondary(ac) {
+          note(ac, { freq: 440.00, endFreq: 659.25, dur: 0.085, gain: 0.042, cutoff: 2400, type: 'triangle', overtone: 0.1 });
+        },
+        tab(ac) {
+          note(ac, { freq: 739.99, dur: 0.068, gain: 0.038, cutoff: 2400, type: 'triangle', overtone: 0.1 });
+        },
+        back(ac) {
+          note(ac, { freq: 783.99, dur: 0.085, gain: 0.042, cutoff: 2300, type: 'triangle', overtone: 0.1 });
+          note(ac, { freq: 493.88, dur: 0.14, gain: 0.042, delay: 0.048, cutoff: 2000, type: 'sine', overtone: 0.1 });
+        },
+        toggle(ac) {
+          note(ac, { freq: 392.00, dur: 0.12, gain: 0.042, cutoff: 2600, type: 'triangle', overtone: 0.12 });
+          note(ac, { freq: 587.33, dur: 0.14, gain: 0.044, delay: 0.055, cutoff: 2700, type: 'sine', overtone: 0.16 });
+          note(ac, { freq: 987.77, dur: 0.22, gain: 0.042, delay: 0.11, cutoff: 2900, type: 'sine', overtone: 0.2 });
         }
       }
-    } catch (err) {
-      console.error(`Failed to fetch games for family member ${memberId}:`, err);
-    }
-  }
-  
-  const allGames = Array.from(gamesMap.values());
-  let existingHltbMap = new Map();
-  if (!force) {
-    const currentLibrary = await getMobileLibrary();
-    (currentLibrary.games || []).forEach(g => {
-      if (g.hltb) existingHltbMap.set(g.appid, g.hltb);
-    });
-  }
-  
-  const mergedGames = allGames.map(game => ({
-    ...game,
-    hltb: existingHltbMap.get(game.appid) || null
-  }));
-  
-  const libraryData = {
-    games: mergedGames,
-    lastSync: Date.now()
-  };
-  
-  await saveMobileLibrary(libraryData);
-  return libraryData;
-}
+    };
 
-// Fetch single game HLTB details on mobile or desktop
-async function fetchHltbData(game) {
-  if (isMobileApp) {
-    const cleanedTitle = cleanGameTitleForSearch(game.name);
-    if (!cleanedTitle) return { title: game.name, notFound: true };
-    
-    console.log(`Searching HowLongToBeat (mobile) for: "${game.name}" (Cleaned: "${cleanedTitle}")...`);
-    let results = await scrapeHltbMobile(game.name);
-    
-    if (!results || results.length === 0) {
-      if (cleanedTitle !== game.name.toLowerCase().trim()) {
-        results = await scrapeHltbMobile(cleanedTitle);
+    function play(kind) {
+      if (!enabled) return;
+      const isHover = kind === 'hover' || kind === 'cardHover';
+      if (isHover) {
+        const nowMs = performance.now();
+        const cooldown = kind === 'cardHover' ? 95 : 75;
+        if (nowMs - lastHoverAt < cooldown) return;
+        lastHoverAt = nowMs;
       }
-    }
-    
-    if (results && results.length > 0) {
-      const cacheKey = game.name.trim().toLowerCase();
-      const exactMatch = results.find(r => r.game_name?.toLowerCase() === cacheKey);
-      const match = exactMatch || results[0];
-      
-      return {
-        hltbId: String(match.game_id),
-        title: match.game_name,
-        gameplayMain: Math.round((match.comp_main || 0) / 3600),
-        gameplayMainExtra: Math.round((match.comp_plus || 0) / 3600),
-        gameplayCompletionist: Math.round((match.comp_100 || 0) / 3600),
-        imageUrl: match.game_image ? `https://howlongtobeat.com/games/${match.game_image}` : '',
-        notFound: false
+
+      const ac = ensureContext(!isHover);
+      if (!ac) return;
+      if (isHover && ac.state !== 'running') return;
+
+      const fire = () => {
+        const profile = PROFILES[getTheme()] || PROFILES.ceramic;
+        const fn = profile[kind] || profile.secondary;
+        if (isHover) {
+          hoverToggle = !hoverToggle;
+          fn(ac, hoverToggle ? 1.0 : 1.045);
+        } else {
+          fn(ac);
+        }
       };
-    } else {
-      return {
-        title: game.name,
-        notFound: true
-      };
-    }
-  } else {
-    const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}&appid=${game.appid}`);
-    if (!res.ok) throw new Error('HLTB fetch failed');
-    return await res.json();
-  }
-}
 
-// DOM Elements
-const configStatus = document.getElementById('config-status');
-const statTotalGames = document.getElementById('stat-total-games');
-const statTotalPlaytime = document.getElementById('stat-total-playtime');
-const statSharedGames = document.getElementById('stat-shared-games');
-const statCompletedGames = document.getElementById('stat-completed-games');
-const searchInput = document.getElementById('search-input');
-const sortSelect = document.getElementById('sort-select');
-const filterBtns = document.querySelectorAll('.filter-btn');
-const loadingView = document.getElementById('loading-view');
-const loadingTitle = document.getElementById('loading-title');
-const loadingSubtitle = document.getElementById('loading-subtitle');
-const errorView = document.getElementById('error-view');
-const errorMessage = document.getElementById('error-message');
-const librarySection = document.getElementById('library-section');
-const gamesGrid = document.getElementById('games-grid');
-const visibleGamesCount = document.getElementById('visible-games-count');
-const hltbSyncStatus = document.getElementById('hltb-sync-status');
-const hltbSyncPercent = document.getElementById('hltb-sync-percent');
-const syncBtn = document.getElementById('sync-btn');
-const lastSyncTime = document.getElementById('last-sync-time');
-const hideZeroCheckbox = document.getElementById('hide-zero-hours-checkbox');
-const hltbTimeCategory = document.getElementById('hltb-time-category');
-const hltbMinTime = document.getElementById('hltb-min-time');
-const hltbMaxTime = document.getElementById('hltb-max-time');
-
-// Theme and Electron environment: Apply preferences immediately to avoid flash
-(function() {
-  const saved = localStorage.getItem('theme');
-  if (saved === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-  }
-  
-  // Detect if running under Electron
-  const isElectron = navigator.userAgent.toLowerCase().includes('electron');
-  if (isElectron) {
-    document.documentElement.classList.add('is-electron');
-  }
-
-  // Disable keyboard zoom (Ctrl+/Ctrl-/Ctrl0) and mouse wheel zoom
-  window.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && (e.key === '=' || e.key === '-' || e.key === '+' || e.key === '0')) {
-      e.preventDefault();
-    }
-  });
-  window.addEventListener('wheel', (e) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-    }
-  }, { passive: false });
-})();
-
-// Initialize App
-document.addEventListener('DOMContentLoaded', () => {
-  fetchLibrary();
-  setupEventListeners();
-  initThemeToggle();
-});
-
-// Setup Event Listeners
-function setupEventListeners() {
-  searchInput.addEventListener('input', debounce(handleSearchAndFilter, 250));
-  sortSelect.addEventListener('change', (e) => {
-    currentSort = e.target.value;
-    renderGrid();
-  });
-  
-  filterBtns.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      filterBtns.forEach(b => b.classList.remove('active'));
-      e.target.classList.add('active');
-      currentFilter = e.target.dataset.filter;
-      handleSearchAndFilter();
-    });
-  });
-
-  if (syncBtn) {
-    syncBtn.addEventListener('click', () => {
-      if (games.length > 0) {
-        const syncModal = document.getElementById('sync-options-modal');
-        if (syncModal) syncModal.style.display = 'flex';
+      if (ac.state === 'running') {
+        fire();
       } else {
-        triggerSync(false);
+        ac.resume().then(fire).catch(() => {});
       }
-    });
-  }
+    }
 
-  // Sync Modal listeners
-  const closeSyncModalBtn = document.getElementById('close-sync-modal-btn');
-  const quickSyncBtn = document.getElementById('quick-sync-btn');
-  const fullSyncBtn = document.getElementById('full-sync-btn');
-  const syncModal = document.getElementById('sync-options-modal');
+    function init() {
+      const unlock = () => ensureContext(true);
+      window.addEventListener('pointerdown', unlock, { passive: true });
+      window.addEventListener('keydown', unlock, { passive: true });
 
-  if (closeSyncModalBtn && syncModal) {
-    closeSyncModalBtn.addEventListener('click', () => {
-      syncModal.style.display = 'none';
-    });
-  }
-  if (quickSyncBtn) {
-    quickSyncBtn.addEventListener('click', () => {
-      triggerSync(false);
-    });
-  }
-  if (fullSyncBtn) {
-    fullSyncBtn.addEventListener('click', () => {
-      triggerSync(true);
-    });
-  }
+      const HOVER_BTN_SELECTOR = '.btn, .filter-pill, .pace-pill, .btn-icon, .drawer-close-btn, .theme-switch, .theme-option-card, .choice-card, .text-action-btn, .rematch-item, .search-clear-btn, .select-trigger, .select-option';
+      const HOVER_SOFT_SELECTOR = '.game-card, .insight-link-btn, .setup-steps a, .field-hint a, .checkbox-field, .kpi-tile';
 
-  if (hideZeroCheckbox) {
-    hideZeroCheckbox.addEventListener('change', handleSearchAndFilter);
-  }
+      document.addEventListener('pointerover', (e) => {
+        const target = e.target instanceof Element ? e.target : null;
+        if (!target) return;
 
-  if (hltbTimeCategory) hltbTimeCategory.addEventListener('change', handleSearchAndFilter);
-  if (hltbMinTime) hltbMinTime.addEventListener('input', debounce(handleSearchAndFilter, 250));
-  if (hltbMaxTime) hltbMaxTime.addEventListener('input', debounce(handleSearchAndFilter, 250));
+        const btn = target.closest(HOVER_BTN_SELECTOR);
+        if (btn) {
+          const fromBtn = e.relatedTarget instanceof Element ? e.relatedTarget.closest(HOVER_BTN_SELECTOR) : null;
+          if (fromBtn === btn || btn.disabled) return;
+          play('hover');
+          return;
+        }
 
-  const toggleControlsBtn = document.getElementById('toggle-controls-btn');
-  const controlsSection = document.querySelector('.controls-section');
-  if (toggleControlsBtn && controlsSection) {
-    toggleControlsBtn.addEventListener('click', () => {
-      controlsSection.classList.toggle('collapsed');
-      toggleControlsBtn.classList.toggle('expanded');
-      const led = toggleControlsBtn.querySelector('.toggle-led');
-      if (led) {
-        led.classList.toggle('active');
+        const soft = target.closest(HOVER_SOFT_SELECTOR);
+        if (soft) {
+          const fromSoft = e.relatedTarget instanceof Element ? e.relatedTarget.closest(HOVER_SOFT_SELECTOR) : null;
+          if (fromSoft === soft || soft.disabled) return;
+          if (soft.classList.contains('kpi-tile') && getTheme() !== 'aero') return;
+          play('cardHover');
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        const target = e.target instanceof Element ? e.target : null;
+        if (!target) return;
+
+        // Theme toggle & theme picker cards play their own 'toggle' chime
+        if (target.closest('#theme-toggle, .theme-option-card')) return;
+
+        if (target.closest('.drawer-close-btn, #close-settings-btn, #close-sync-modal-btn, #close-rematch-btn, #cancel-settings-btn')) {
+          play('back');
+        } else if (target.closest('.filter-pill, .pace-pill, .select-option')) {
+          play('tab');
+        } else if (target.closest('.btn-primary, #suggest-next-btn, .choice-card, .insight-link-btn:not(:disabled)')) {
+          play('primary');
+        } else if (target.closest('.btn-secondary, .btn-ghost, .btn-icon, .text-action-btn, .rematch-item, .search-clear-btn, .select-trigger')) {
+          play('secondary');
+        }
+      });
+    }
+
+    return {
+      isEnabled: () => enabled,
+      setEnabled(val) {
+        enabled = Boolean(val);
+        localStorage.setItem('soundEnabled', String(enabled));
+      },
+      play,
+      init
+    };
+  })();
+
+  // ==========================================================================
+  // THEME MANAGEMENT (4 Themes + Mix-and-Match Light/Dark Pairs)
+  // ==========================================================================
+
+  const THEME_LABELS = {
+    ceramic: 'Wii Ceramic',
+    obsidian: 'Noir Editorial',
+    aero: 'Crystal Vista',
+    y2k: 'Cyber Chrome'
+  };
+
+  function initTheme() {
+    const legacy = localStorage.getItem('theme');
+    let themeMode = localStorage.getItem('themeMode') || (legacy === 'dark' ? 'dark' : 'light');
+    let lightTheme = localStorage.getItem('lightTheme') || 'ceramic';
+    let darkTheme = localStorage.getItem('darkTheme') || 'obsidian';
+
+    if (lightTheme !== 'ceramic' && lightTheme !== 'aero') lightTheme = 'ceramic';
+    if (darkTheme !== 'obsidian' && darkTheme !== 'y2k') darkTheme = 'obsidian';
+    if (themeMode !== 'light' && themeMode !== 'dark') themeMode = 'light';
+
+    const applyTheme = () => {
+      const activeTheme = themeMode === 'dark' ? darkTheme : lightTheme;
+      document.documentElement.setAttribute('data-mode', themeMode);
+      document.documentElement.setAttribute('data-theme', activeTheme);
+      localStorage.setItem('themeMode', themeMode);
+      localStorage.setItem('lightTheme', lightTheme);
+      localStorage.setItem('darkTheme', darkTheme);
+      localStorage.setItem('theme', themeMode);
+
+      el.themeToggle.setAttribute('aria-checked', String(themeMode === 'dark'));
+      el.themeToggle.title = `Switch between ${THEME_LABELS[lightTheme]} and ${THEME_LABELS[darkTheme]}`;
+
+      if (el.themePickerGrid) {
+        el.themePickerGrid.querySelectorAll('.theme-option-card').forEach((btn) => {
+          const choice = btn.dataset.themeChoice;
+          btn.classList.toggle('is-active', choice === activeTheme);
+          btn.classList.toggle('is-paired', choice === lightTheme || choice === darkTheme);
+        });
       }
+    };
+
+    applyTheme();
+
+    el.themeToggle.addEventListener('click', () => {
+      themeMode = themeMode === 'dark' ? 'light' : 'dark';
+      applyTheme();
+      SoundFX.play('toggle');
     });
-  }
 
-  // Settings Modal Listeners
-  const settingsBtn = document.getElementById('settings-btn');
-  const closeSettingsBtn = document.getElementById('close-settings-btn');
-  const settingsModal = document.getElementById('settings-modal');
-  const settingsForm = document.getElementById('settings-form');
-  
-  if (settingsBtn && settingsModal) {
-    settingsBtn.addEventListener('click', openSettingsModal);
-  }
-  if (closeSettingsBtn && settingsModal) {
-    closeSettingsBtn.addEventListener('click', () => {
-      settingsModal.style.display = 'none';
-    });
-  }
-  if (settingsForm) {
-    settingsForm.addEventListener('submit', handleSettingsSave);
-  }
-
-  // Suggest Next Game Listener
-  const suggestNextBtn = document.getElementById('suggest-next-btn');
-  if (suggestNextBtn) {
-    suggestNextBtn.addEventListener('click', suggestNextGame);
-  }
-
-  // Detail Panel Listeners
-  const closeDetailBtn = document.getElementById('close-detail-btn');
-  const panelOverlay = document.getElementById('panel-overlay');
-  const detailPanel = document.getElementById('game-detail-panel');
-  
-  if (closeDetailBtn && detailPanel) {
-    closeDetailBtn.addEventListener('click', closeGameDetail);
-  }
-  if (panelOverlay && detailPanel) {
-    panelOverlay.addEventListener('click', closeGameDetail);
-  }
-
-  // Close modals on Escape key
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (settingsModal) settingsModal.style.display = 'none';
-      if (syncModal) syncModal.style.display = 'none';
-      closeGameDetail();
+    if (el.themePickerGrid) {
+      el.themePickerGrid.addEventListener('click', (e) => {
+        const card = e.target.closest('.theme-option-card');
+        if (!card) return;
+        const choice = card.dataset.themeChoice;
+        const polarity = card.dataset.themePolarity;
+        if (polarity === 'dark') {
+          darkTheme = choice;
+          themeMode = 'dark';
+        } else {
+          lightTheme = choice;
+          themeMode = 'light';
+        }
+        applyTheme();
+        SoundFX.play('toggle');
+      });
     }
-  });
 
-  // Infinite scroll listener to load games in batches as user scrolls down
-  window.addEventListener('scroll', () => {
-    if ((window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 300)) {
-      loadNextGamesBatch();
+    if (el.settingsSoundToggle) {
+      el.settingsSoundToggle.checked = SoundFX.isEnabled();
+      el.settingsSoundToggle.addEventListener('change', () => {
+        SoundFX.setEnabled(el.settingsSoundToggle.checked);
+        if (el.settingsSoundToggle.checked) {
+          SoundFX.play('tab');
+        }
+      });
     }
-  });
-}
 
-// Theme Toggle: Switch between light (Y2K Aero) and dark (Retro Pixel)
-function initThemeToggle() {
-  const toggleBtn = document.getElementById('capsule-theme-toggle');
-  if (!toggleBtn) return;
-
-  // Set correct aria state on load
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  toggleBtn.setAttribute('aria-checked', isDark ? 'true' : 'false');
-
-  toggleBtn.addEventListener('click', () => {
-    const currentlyDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    if (currentlyDark) {
-      document.documentElement.removeAttribute('data-theme');
-      localStorage.setItem('theme', 'light');
-      toggleBtn.setAttribute('aria-checked', 'false');
-    } else {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      localStorage.setItem('theme', 'dark');
-      toggleBtn.setAttribute('aria-checked', 'true');
+    // Restrict pinch/zoom only in Electron wrapper, never break normal browser zoom
+    if (document.documentElement.classList.contains('is-electron')) {
+      window.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && ['=', '-', '+', '0'].includes(e.key)) e.preventDefault();
+      });
     }
-  });
-
-  // Allow keyboard toggling
-  toggleBtn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggleBtn.click();
-    }
-  });
-}
-
-// Format Last Sync Time into relative/absolute format
-function formatLastSyncTime(timestamp) {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  return `Last synced: ${date.toLocaleString()}`;
-}
-
-// Trigger Steam API Sync and import games
-async function triggerSync(force = false) {
-  if (!syncBtn) return;
-  
-  // Close the sync options modal if open
-  const syncModal = document.getElementById('sync-options-modal');
-  if (syncModal) syncModal.style.display = 'none';
-  
-  // Disable button and controls while syncing
-  syncBtn.disabled = true;
-  const originalHtml = syncBtn.innerHTML;
-  syncBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Syncing...';
-  
-  const isInitialSync = games.length === 0;
-  if (isInitialSync) {
-    loadingView.style.display = 'flex';
-    loadingTitle.textContent = 'Syncing Steam Library...';
-    loadingSubtitle.textContent = 'Contacting Steam Web APIs and importing games list';
-    librarySection.style.display = 'none';
-    errorView.style.display = 'none';
   }
-  
-  try {
-    let data;
-    if (isMobileApp) {
-      data = await performMobileSync(force);
-    } else {
-      const res = await fetch('/api/sync', { 
+
+  // ==========================================================================
+  // DATA LOADING & SYNCING
+  // ==========================================================================
+
+  function indexGames(list) {
+    state.games = list.map(g => ({
+      ...g,
+      hltb: g.hltb || null,
+      hltbLoading: false,
+      hltbError: false
+    }));
+    state.gamesById.clear();
+    for (const g of state.games) {
+      state.gamesById.set(g.appid, g);
+    }
+  }
+
+  async function fetchLibrary() {
+    el.loadingView.hidden = false;
+    el.errorView.hidden = true;
+    el.librarySection.hidden = true;
+    el.loadingTitle.textContent = 'Loading your library';
+    el.loadingSubtitle.textContent = 'Reading cached games and playtime data...';
+
+    try {
+      const res = await fetch('/api/games');
+      if (!res.ok) throw new Error('Could not reach local server.');
+      const data = await res.json();
+
+      state.manualBeaten = new Set(data.manualBeaten || []);
+      state.manualUnbeaten = new Set(data.manualUnbeaten || []);
+      state.lastSync = data.lastSync || 0;
+      indexGames(data.games || []);
+
+      if (!data.configured && state.games.length === 0) {
+        setStatusPill('error', 'Setup needed');
+        el.syncBtn.hidden = true;
+        el.loadingView.hidden = true;
+        el.errorView.hidden = false;
+        el.errorTitle.textContent = 'Connect Your Steam Account';
+        el.errorMessage.textContent = 'Add your Steam Web API Key and Steam ID in Settings to import your library and Family Sharing games.';
+        return;
+      }
+
+      setStatusPill('connected', 'Steam Connected');
+      el.syncBtn.hidden = false;
+      if (state.lastSync > 0) {
+        el.lastSyncTime.textContent = formatRelativeSync(state.lastSync);
+        el.lastSyncTime.hidden = false;
+      } else {
+        el.lastSyncTime.hidden = true;
+      }
+
+      el.loadingView.hidden = true;
+      el.librarySection.hidden = false;
+
+      if (state.games.length === 0) {
+        setControlsEnabled(false);
+        updateStatsAndInsights();
+        renderUnsyncedState();
+      } else {
+        setControlsEnabled(true);
+        populateGenreDropdown();
+        updateStatsAndInsights();
+        applyFiltersAndRender();
+      }
+    } catch (err) {
+      console.error('Library load failed:', err);
+      setStatusPill('error', 'Offline');
+      el.loadingView.hidden = true;
+      el.errorView.hidden = false;
+      el.errorTitle.textContent = 'Connection Error';
+      el.errorMessage.textContent = err.message || 'Could not load library from server.';
+    }
+  }
+
+  function renderUnsyncedState() {
+    el.visibleGamesCount.textContent = '0';
+    el.gamesGrid.innerHTML = `
+      <div class="state-card" style="grid-column: 1 / -1;">
+        <div class="state-icon"><i class="fa-solid fa-cloud-arrow-down"></i></div>
+        <h3>Your library is ready to sync</h3>
+        <p>Import your owned and Steam Family Sharing games along with HowLongToBeat durations.</p>
+        <button type="button" class="btn btn-primary" data-action="sync-now">
+          <i class="fa-solid fa-arrows-rotate"></i> Sync Library Now
+        </button>
+      </div>
+    `;
+  }
+
+  async function triggerSync(force = false) {
+    el.syncModal.hidden = true;
+    el.syncBtn.disabled = true;
+    el.syncBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i><span>Syncing...</span>';
+
+    const wasEmpty = state.games.length === 0;
+    if (wasEmpty) {
+      el.loadingView.hidden = false;
+      el.loadingTitle.textContent = 'Syncing Steam library';
+      el.loadingSubtitle.textContent = 'Fetching owned and Family Sharing titles from Steam...';
+      el.librarySection.hidden = true;
+      el.errorView.hidden = true;
+    }
+
+    try {
+      const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force })
       });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to sync with Steam.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Steam sync failed.');
+
+      state.manualBeaten = new Set(data.manualBeaten || []);
+      state.manualUnbeaten = new Set(data.manualUnbeaten || []);
+      state.lastSync = data.lastSync || Date.now();
+      indexGames(data.games || []);
+
+      el.lastSyncTime.textContent = formatRelativeSync(state.lastSync);
+      el.lastSyncTime.hidden = false;
+      setStatusPill('connected', 'Steam Connected');
+
+      el.loadingView.hidden = true;
+      el.librarySection.hidden = false;
+      setControlsEnabled(state.games.length > 0);
+
+      populateGenreDropdown();
+      updateStatsAndInsights();
+      applyFiltersAndRender();
+      showToast(`Synced ${state.games.length} titles from Steam.`, 'success');
+
+      startHltbSync();
+    } catch (err) {
+      console.error('Sync failed:', err);
+      showToast(err.message || 'Sync failed.', 'error');
+      if (wasEmpty) {
+        el.loadingView.hidden = true;
+        el.errorView.hidden = false;
+        el.errorTitle.textContent = 'Sync Failed';
+        el.errorMessage.textContent = err.message || 'Verify your Steam API key and profile privacy settings.';
       }
-      data = await res.json();
+    } finally {
+      el.syncBtn.disabled = false;
+      el.syncBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i><span>Sync Library</span>';
     }
-    
-    // Map new games list and keep existing client-side HLTB cache if available
-    const existingHltbMap = new Map();
-    if (!force) {
-      games.forEach(g => {
-        if (g.hltb) {
-          existingHltbMap.set(g.appid, g.hltb);
-        }
-      });
-    }
-    
-    games = data.games.map(game => ({
-      ...game,
-      hltb: existingHltbMap.get(game.appid) || game.hltb || null,
-      hltbLoading: false,
-      hltbError: false
-    }));
-    
-    // Update last sync text
-    if (lastSyncTime) {
-      lastSyncTime.textContent = formatLastSyncTime(data.lastSync);
-      lastSyncTime.style.display = 'inline';
-    }
-    
-    // Re-enable search controls
-    searchInput.disabled = false;
-    sortSelect.disabled = false;
-    if (hideZeroCheckbox) hideZeroCheckbox.disabled = false;
-    if (hltbTimeCategory) hltbTimeCategory.disabled = false;
-    if (hltbMinTime) hltbMinTime.disabled = false;
-    if (hltbMaxTime) hltbMaxTime.disabled = false;
-    
-    // Hide loader, show library
-    loadingView.style.display = 'none';
-    librarySection.style.display = 'block';
-    
-    // Update UI
-    updateStats();
-    handleSearchAndFilter();
-    
-    // Trigger HLTB sync queue
-    startHltbSync();
-    
-  } catch (err) {
-    console.error('Sync failed:', err);
-    alert(`Sync failed: ${err.message || 'Check server logs.'}`);
-    
-    if (isInitialSync) {
-      loadingView.style.display = 'none';
-      errorView.style.display = 'flex';
-      errorMessage.textContent = err.message || 'Sync failed. Verify config.json.';
-    }
-  } finally {
-    // Restore button state
-    syncBtn.disabled = false;
-    syncBtn.innerHTML = originalHtml;
   }
-}
 
-// Fetch Games from Local Server API
-async function fetchLibrary() {
-  try {
-    // Show spinner initially
-    loadingView.style.display = 'flex';
-    loadingTitle.textContent = 'Loading library...';
-    loadingSubtitle.textContent = 'Fetching games list from local database';
-    
-    let data;
-    if (isMobileApp) {
-      const mobileConfig = await getMobileConfig();
-      if (!mobileConfig || !mobileConfig.STEAM_API_KEY || !mobileConfig.STEAM_ID) {
-        throw new Error('Steam credentials are not configured.');
+  // ==========================================================================
+  // HLTB BACKGROUND QUEUE (Throttled UI Updates)
+  // ==========================================================================
+
+  const throttledStatsUpdate = throttle(() => {
+    updateStatsAndInsights();
+    populateGenreDropdown();
+  }, 600);
+
+  function startHltbSync() {
+    const missing = state.games.filter(g => !g.hltb);
+    if (missing.length === 0) {
+      el.hltbSyncStatus.hidden = true;
+      return;
+    }
+
+    // Prioritize games the user has played
+    missing.sort((a, b) => (b.playtime_forever || 0) - (a.playtime_forever || 0));
+    state.syncQueue = missing;
+    state.syncTotal = missing.length;
+    state.syncDone = 0;
+
+    el.hltbSyncStatus.hidden = false;
+    updateSyncBadge();
+
+    const toSpawn = Math.min(MAX_CONCURRENT_SYNC - state.activeWorkers, state.syncQueue.length);
+    for (let i = 0; i < toSpawn; i++) {
+      runSyncWorker();
+    }
+  }
+
+  async function runSyncWorker() {
+    if (state.syncQueue.length === 0) {
+      if (state.activeWorkers === 0) {
+        updateStatsAndInsights();
+        populateGenreDropdown();
+        updateSyncBadge();
       }
-      data = await getMobileLibrary();
+      return;
+    }
+
+    state.activeWorkers++;
+    const game = state.syncQueue.shift();
+    game.hltbLoading = true;
+    patchGameCard(game);
+
+    try {
+      const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}&appid=${game.appid}`);
+      if (!res.ok) throw new Error('HLTB fetch error');
+      game.hltb = await res.json();
+      game.hltbError = false;
+    } catch (err) {
+      console.warn(`HLTB sync failed for "${game.name}":`, err.message);
+      game.hltbError = true;
+    } finally {
+      game.hltbLoading = false;
+      state.syncDone++;
+      state.activeWorkers--;
+    }
+
+    patchGameCard(game);
+    if (state.activeDetailAppId === game.appid) {
+      renderDetailDrawer(game);
+    }
+    throttledStatsUpdate();
+    updateSyncBadge();
+
+    if (state.syncQueue.length > 0) {
+      setTimeout(runSyncWorker, 120);
+    } else if (state.activeWorkers === 0) {
+      updateStatsAndInsights();
+      populateGenreDropdown();
+      setTimeout(() => {
+        if (state.syncQueue.length === 0 && state.activeWorkers === 0) {
+          el.hltbSyncStatus.hidden = true;
+        }
+      }, 2400);
+    }
+  }
+
+  function updateSyncBadge() {
+    const pct = state.syncTotal > 0 ? Math.min(100, Math.round((state.syncDone / state.syncTotal) * 100)) : 100;
+    el.hltbSyncPercent.textContent = `${pct}%`;
+  }
+
+  // ==========================================================================
+  // STATS & INSIGHTS
+  // ==========================================================================
+
+  function updateStatsAndInsights() {
+    const total = state.games.length;
+    const totalMins = state.games.reduce((sum, g) => sum + (g.playtime_forever || 0), 0);
+    const shared = state.games.filter(g => !g.is_owned).length;
+    const completed = state.games.filter(g => isGameBeaten(g)).length;
+
+    el.statTotalGames.textContent = total.toLocaleString();
+    el.statTotalPlaytime.textContent = `${Math.round(totalMins / 60).toLocaleString()}h`;
+    el.statSharedGames.textContent = shared.toLocaleString();
+    el.statCompletedGames.textContent = completed.toLocaleString();
+
+    if (total === 0) {
+      el.insightsSection.hidden = true;
+      return;
+    }
+    el.insightsSection.hidden = false;
+
+    // Active backlog (owned, unfinished, non-endless)
+    const backlog = state.games.filter(g => {
+      if (!g.is_owned || isEndlessOrUtility(g.name) || isGameBeaten(g)) return false;
+      if (!g.hltb || g.hltb.notFound) return (g.playtime_forever || 0) === 0;
+      return true;
+    });
+
+    const backlogHours = Math.round(backlog.reduce((sum, g) => {
+      const played = (g.playtime_forever || 0) / 60;
+      const main = (g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0) ? g.hltb.gameplayMain : 8;
+      return sum + Math.max(0, main - played);
+    }, 0));
+
+    el.insightBacklogGames.textContent = `${backlog.length.toLocaleString()} games`;
+    el.insightBacklogHours.textContent = `${backlogHours.toLocaleString()}h estimated remaining`;
+
+    // Clearance estimate
+    const weeks = backlogHours / state.weeklyPace;
+    const months = Math.ceil(weeks / 4.33);
+    if (backlogHours === 0) {
+      el.insightClearTime.textContent = 'Cleared';
+    } else if (months < 1) {
+      el.insightClearTime.textContent = '< 1 month';
+    } else if (months < 18) {
+      el.insightClearTime.textContent = `~${months} ${months === 1 ? 'month' : 'months'}`;
     } else {
-      const res = await fetch('/api/games');
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to fetch library.');
-      }
-      data = await res.json();
+      const years = (months / 12).toFixed(1);
+      el.insightClearTime.textContent = `~${years} years`;
     }
-    
-    // Set up status badge
-    configStatus.className = 'status-badge status-connected';
-    configStatus.innerHTML = '<i class="fa-solid fa-circle-check"></i> Connected to Steam';
-    
-    // Show sync button since we are connected
-    if (syncBtn) {
-      syncBtn.style.display = 'inline-flex';
-    }
-    
-    // Set up last sync text if available
-    if (data.lastSync > 0) {
-      if (lastSyncTime) {
-        lastSyncTime.textContent = formatLastSyncTime(data.lastSync);
-        lastSyncTime.style.display = 'inline';
-      }
+    el.insightPaceNote.textContent = `At ${state.weeklyPace} hrs/week`;
+
+    // Longest unplayed owned gem
+    const unplayed = state.games
+      .filter(g => g.is_owned && (g.playtime_forever || 0) === 0 && g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0 && !isEndlessOrUtility(g.name))
+      .sort((a, b) => b.hltb.gameplayMain - a.hltb.gameplayMain);
+
+    if (unplayed.length > 0) {
+      const gem = unplayed[0];
+      el.insightNeglectedName.textContent = gem.name;
+      el.insightNeglectedTime.textContent = `${gem.hltb.gameplayMain}h main story`;
+      el.insightNeglectedBtn.disabled = false;
+      el.insightNeglectedBtn.dataset.appid = String(gem.appid);
     } else {
-      if (lastSyncTime) {
-        lastSyncTime.style.display = 'none';
+      el.insightNeglectedName.textContent = 'None found';
+      el.insightNeglectedTime.textContent = 'Every rated game has been started';
+      el.insightNeglectedBtn.disabled = true;
+      delete el.insightNeglectedBtn.dataset.appid;
+    }
+  }
+
+  function suggestNextGame() {
+    const candidates = state.filteredGames.filter(g =>
+      !isGameBeaten(g) &&
+      !isEndlessOrUtility(g.name) &&
+      g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0
+    );
+
+    if (candidates.length === 0) {
+      el.suggestedGameBtn.hidden = true;
+      el.suggestedGameTime.textContent = 'No unfinished games with HLTB times in current view';
+      return;
+    }
+
+    // Weight shorter unfinished games higher for quick backlog wins
+    let totalWeight = 0;
+    const weighted = candidates.map(g => {
+      const remaining = Math.max(1, g.hltb.gameplayMain - ((g.playtime_forever || 0) / 60));
+      const weight = 100 / remaining;
+      totalWeight += weight;
+      return { game: g, weight };
+    });
+
+    let roll = Math.random() * totalWeight;
+    let pick = candidates[0];
+    for (const entry of weighted) {
+      roll -= entry.weight;
+      if (roll <= 0) {
+        pick = entry.game;
+        break;
       }
     }
-    
-    games = data.games.map(game => ({
-      ...game,
-      hltb: game.hltb || null,
-      hltbLoading: false,
-      hltbError: false
-    }));
 
-    // Hide initial page loader
-    loadingView.style.display = 'none';
-    librarySection.style.display = 'block';
+    el.suggestedGameName.textContent = pick.name;
+    el.suggestedGameBtn.dataset.appid = String(pick.appid);
+    el.suggestedGameBtn.hidden = false;
+    el.suggestedGameTime.textContent = `${pick.hltb.gameplayMain}h main story · ${((pick.playtime_forever || 0) / 60).toFixed(1)}h played`;
+  }
 
-    if (data.lastSync === 0 && games.length === 0) {
-      // Library is empty and not synced yet. Disable inputs, display instructions
-      searchInput.disabled = true;
-      sortSelect.disabled = true;
-      if (hideZeroCheckbox) hideZeroCheckbox.disabled = true;
-      if (hltbTimeCategory) hltbTimeCategory.disabled = true;
-      if (hltbMinTime) hltbMinTime.disabled = true;
-      if (hltbMaxTime) hltbMaxTime.disabled = true;
-      updateStats();
-      
-      gamesGrid.innerHTML = `
-        <div class="status-view" style="grid-column: 1 / -1; padding: 4rem 2rem;">
-          <i class="fa-solid fa-cloud-arrow-down" style="font-size: 3rem; color: var(--steam-light-blue); margin-bottom: 1rem; opacity: 0.8;"></i>
-          <h3 style="font-family: var(--font-display); font-size: 1.5rem; margin-bottom: 0.5rem;">Library Not Synced</h3>
-          <p style="color: var(--text-secondary); max-width: 450px; margin: 0 auto 1.5rem auto; line-height: 1.5;">Your local library database is empty. Click the <strong>Sync Library</strong> button in the top right to import your games from Steam.</p>
-          <button class="retry-btn" onclick="triggerSync()" style="margin: 0 auto;"><i class="fa-solid fa-arrows-rotate"></i> Sync Library Now</button>
+  // ==========================================================================
+  // FILTERING, SORTING & INCREMENTAL RENDERING
+  // ==========================================================================
+
+  function normalizeGenreKey(raw) {
+    return String(raw || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[-–—]+/g, '-')
+      .toLowerCase();
+  }
+
+  function formatGenreLabel(raw) {
+    const cleaned = String(raw || '').trim().replace(/\s+/g, ' ').replace(/[-–—]+/g, '-');
+    if (!cleaned) return '';
+    const lowercaseWords = new Set(['and', 'or', 'of', 'the', 'in', 'on', 'to', 'for', "'em", 'em']);
+    return cleaned
+      .split(' ')
+      .map((word, idx) =>
+        word
+          .split('-')
+          .map((part, pIdx) => {
+            if (!part) return '';
+            if (part.length <= 4 && part === part.toUpperCase() && /[A-Z]/.test(part)) return part;
+            const lower = part.toLowerCase();
+            if (idx > 0 && pIdx === 0 && lowercaseWords.has(lower)) return lower;
+            return lower.replace(/[a-z]/, c => c.toUpperCase());
+          })
+          .join('-')
+      )
+      .join(' ');
+  }
+
+  function populateGenreDropdown() {
+    const genreMap = new Map();
+    for (const g of state.games) {
+      if (g.hltb && g.hltb.genres) {
+        for (const item of g.hltb.genres.split(',')) {
+          const key = normalizeGenreKey(item);
+          if (!key) continue;
+          const formatted = formatGenreLabel(item);
+          const existing = genreMap.get(key);
+          // Prefer formatted label, or an existing uppercase-initial variant
+          if (!existing || (existing === existing.toLowerCase() && formatted !== formatted.toLowerCase())) {
+            genreMap.set(key, formatted);
+          }
+        }
+      }
+    }
+
+    const sorted = Array.from(genreMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    const currentKey = state.genre === 'all' ? 'all' : normalizeGenreKey(state.genre);
+    el.genreSelect.innerHTML = '<option value="all">All Genres</option>' +
+      sorted.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+    if (genreMap.has(currentKey)) {
+      state.genre = currentKey;
+      el.genreSelect.value = currentKey;
+    } else {
+      state.genre = 'all';
+      el.genreSelect.value = 'all';
+    }
+    syncCustomSelect(el.genreSelect);
+  }
+
+  function updateAdvancedBadge() {
+    let count = 0;
+    if (state.minTime !== null) count++;
+    if (state.maxTime !== null) count++;
+    if (state.genre !== 'all') count++;
+    if (state.hideZero) count++;
+    el.activeFilterCount.textContent = String(count);
+    el.activeFilterCount.hidden = count === 0;
+  }
+
+  function applyFiltersAndRender() {
+    updateAdvancedBadge();
+    const q = state.search.toLowerCase().trim();
+
+    state.filteredGames = state.games.filter(game => {
+      if (q && !game.name.toLowerCase().includes(q)) return false;
+
+      const playMins = game.playtime_forever || 0;
+      const beaten = isGameBeaten(game);
+
+      switch (state.filter) {
+        case 'owned': if (!game.is_owned) return false; break;
+        case 'shared': if (game.is_owned) return false; break;
+        case 'in_progress': if (!(playMins > 0 && !beaten)) return false; break;
+        case 'unplayed': if (playMins > 0) return false; break;
+        case 'completed': if (!beaten) return false; break;
+      }
+
+      if (state.hideZero && !hasHltbHours(game.hltb)) return false;
+
+      if (state.minTime !== null || state.maxTime !== null) {
+        if (!game.hltb || game.hltb.notFound) return false;
+        const hrs = state.timeCategory === 'extra'
+          ? (game.hltb.gameplayMainExtra || 0)
+          : state.timeCategory === 'completionist'
+            ? (game.hltb.gameplayCompletionist || 0)
+            : (game.hltb.gameplayMain || 0);
+        if (hrs <= 0) return false;
+        if (state.minTime !== null && hrs < state.minTime) return false;
+        if (state.maxTime !== null && hrs > state.maxTime) return false;
+      }
+
+      if (state.genre !== 'all') {
+        if (!game.hltb || !game.hltb.genres) return false;
+        const targetGenre = normalizeGenreKey(state.genre);
+        const list = game.hltb.genres.split(',').map(normalizeGenreKey);
+        if (!list.includes(targetGenre)) return false;
+      }
+
+      return true;
+    });
+
+    sortFilteredGames();
+    el.visibleGamesCount.textContent = state.filteredGames.length.toLocaleString();
+    renderGridInitial();
+  }
+
+  function sortFilteredGames() {
+    const getHltbVal = (g, field, fallback) => {
+      if (!g.hltb || g.hltb.notFound) return fallback;
+      const val = g.hltb[field] || 0;
+      return val > 0 ? val : fallback;
+    };
+
+    const byName = (a, b) => a.name.localeCompare(b.name);
+
+    state.filteredGames.sort((a, b) => {
+      let diff = 0;
+      switch (state.sort) {
+        case 'playtime_asc': {
+          // Put played games (> 0m) ascending first, Unplayed (0m) after
+          const pa = (a.playtime_forever || 0) > 0 ? a.playtime_forever : Infinity;
+          const pb = (b.playtime_forever || 0) > 0 ? b.playtime_forever : Infinity;
+          diff = pa - pb;
+          break;
+        }
+        case 'name_asc': return byName(a, b);
+        case 'name_desc': return byName(b, a);
+        case 'hltb_main_asc':
+          diff = getHltbVal(a, 'gameplayMain', Infinity) - getHltbVal(b, 'gameplayMain', Infinity);
+          break;
+        case 'hltb_main_desc':
+          diff = getHltbVal(b, 'gameplayMain', -Infinity) - getHltbVal(a, 'gameplayMain', -Infinity);
+          break;
+        case 'hltb_extra_asc':
+          diff = getHltbVal(a, 'gameplayMainExtra', Infinity) - getHltbVal(b, 'gameplayMainExtra', Infinity);
+          break;
+        case 'hltb_extra_desc':
+          diff = getHltbVal(b, 'gameplayMainExtra', -Infinity) - getHltbVal(a, 'gameplayMainExtra', -Infinity);
+          break;
+        case 'hltb_completionist_asc':
+          diff = getHltbVal(a, 'gameplayCompletionist', Infinity) - getHltbVal(b, 'gameplayCompletionist', Infinity);
+          break;
+        case 'hltb_completionist_desc':
+          diff = getHltbVal(b, 'gameplayCompletionist', -Infinity) - getHltbVal(a, 'gameplayCompletionist', -Infinity);
+          break;
+        case 'playtime_desc':
+        default:
+          diff = (b.playtime_forever || 0) - (a.playtime_forever || 0);
+          break;
+      }
+      return diff !== 0 ? diff : byName(a, b);
+    });
+  }
+
+  function createCardHtml(game) {
+    const playHrsNum = (game.playtime_forever || 0) / 60;
+    const playHrsText = playHrsNum > 0 ? `${playHrsNum.toFixed(1)}h` : 'Unplayed';
+    const beaten = isGameBeaten(game);
+    const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
+
+    // Completion bar percentage
+    let progressHtml = '';
+    if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0 && (playHrsNum > 0 || beaten)) {
+      const pct = beaten ? 100 : Math.min(100, Math.round((playHrsNum / game.hltb.gameplayMain) * 100));
+      progressHtml = `<div class="card-progress-bar"><div class="card-progress-fill" style="width:${pct}%"></div></div>`;
+    }
+
+    // Subtle subtitle (Year · First Genre)
+    const subParts = [];
+    if (game.hltb && game.hltb.releaseYear) subParts.push(String(game.hltb.releaseYear));
+    if (game.hltb && game.hltb.genres) {
+      const firstGenre = game.hltb.genres.split(',')[0].trim();
+      if (firstGenre) subParts.push(firstGenre);
+    }
+
+    // HLTB strip
+    let hltbHtml;
+    if (game.hltbLoading) {
+      hltbHtml = '<div class="hltb-status-row"><i class="fa-solid fa-circle-notch fa-spin"></i><span>Fetching times...</span></div>';
+    } else if (game.hltbError) {
+      hltbHtml = '<div class="hltb-status-row"><i class="fa-solid fa-circle-exclamation"></i><span>Lookup failed</span></div>';
+    } else if (!game.hltb || game.hltb.notFound || !hasHltbHours(game.hltb)) {
+      hltbHtml = '<div class="hltb-status-row"><span>No HLTB duration</span></div>';
+    } else {
+      const m = game.hltb.gameplayMain || 0;
+      const e = game.hltb.gameplayMainExtra || 0;
+      const c = game.hltb.gameplayCompletionist || 0;
+      hltbHtml = `
+        <div class="hltb-strip">
+          <div class="hltb-cell ${m > 0 ? 'is-main' : 'is-empty'}">
+            <span class="hltb-label">Main</span>
+            <span class="hltb-val">${m > 0 ? `${m}h` : '—'}</span>
+          </div>
+          <div class="hltb-cell ${e > 0 ? 'is-extra' : 'is-empty'}">
+            <span class="hltb-label">Extra</span>
+            <span class="hltb-val">${e > 0 ? `${e}h` : '—'}</span>
+          </div>
+          <div class="hltb-cell ${c > 0 ? 'is-comp' : 'is-empty'}">
+            <span class="hltb-label">100%</span>
+            <span class="hltb-val">${c > 0 ? `${c}h` : '—'}</span>
+          </div>
         </div>
       `;
-      visibleGamesCount.textContent = '0';
-      hltbSyncStatus.style.display = 'none';
-    } else {
-      // Enable controls
-      searchInput.disabled = false;
-      sortSelect.disabled = false;
-      if (hideZeroCheckbox) hideZeroCheckbox.disabled = false;
-      if (hltbTimeCategory) hltbTimeCategory.disabled = false;
-      if (hltbMinTime) hltbMinTime.disabled = false;
-      if (hltbMaxTime) hltbMaxTime.disabled = false;
-      
-      // Compute stats
-      updateStats();
-      
-      // Run initial search/filter
-      handleSearchAndFilter();
-      
-      // NOTE: Do NOT call startHltbSync() here.
-      // HLTB data is loaded from the server's db.json cache.
-      // A fresh HLTB sync only runs when the user explicitly clicks "Sync Library".
     }
-  } catch (err) {
-    console.error('Error fetching library:', err);
-    configStatus.className = 'status-badge status-error';
-    configStatus.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Connection Error';
-    if (isMobileApp) {
-      errorMessage.textContent = 'Could not fetch Steam library. Please configure your Steam API Key and Steam ID.';
-      const helpBox = document.querySelector('#error-view .help-box');
-      if (helpBox) {
-        helpBox.innerHTML = `
-          <h3>How to get started:</h3>
-          <ol>
-            <li>Tap the <strong>Gear Icon</strong> (<i class="fa-solid fa-gear"></i>) in the top-right corner.</li>
-            <li>Enter your <strong>Steam API Key</strong> and <strong>Steam ID</strong>.</li>
-            <li>Tap <strong>Save Settings</strong>.</li>
-            <li>Tap <strong>Sync Library</strong> in the header to import your games!</li>
-          </ol>
-        `;
-      }
-    } else {
-      errorMessage.textContent = err.message || 'Could not connect to server or Steam API.';
-    }
-    loadingView.style.display = 'none';
-    errorView.style.display = 'flex';
-  }
-}
 
-
-// Update Dashboard Statistics
-function updateStats() {
-  statTotalGames.textContent = games.length;
-  
-  // Total playtime
-  const totalPlaytimeMins = games.reduce((sum, g) => sum + (g.playtime_forever || 0), 0);
-  const totalHours = Math.round(totalPlaytimeMins / 60);
-  statTotalPlaytime.textContent = `${totalHours.toLocaleString()}h`;
-  
-  // Shared games
-  const sharedCount = games.filter(g => !g.is_owned).length;
-  statSharedGames.textContent = sharedCount;
-  
-  // Completed games based on HLTB
-  const completedCount = games.filter(g => {
-    if (!g.hltb || g.hltb.notFound) return false;
-    const playHours = (g.playtime_forever || 0) / 60;
-    const storyHours = g.hltb.gameplayMain || 0;
-    return playHours > 0 && storyHours > 0 && playHours >= storyHours;
-  }).length;
-  statCompletedGames.textContent = completedCount;
-
-  // Update insights
-  computeInsights();
-}
-
-// Handle Search and Filter logic combined
-function handleSearchAndFilter() {
-  const query = searchInput.value.toLowerCase().trim();
-  
-  filteredGames = games.filter(game => {
-    // 1. Text Search Filter
-    const matchesSearch = game.name.toLowerCase().includes(query);
-    if (!matchesSearch) return false;
-    
-    // 2. Button Filters
-    const playHours = (game.playtime_forever || 0) / 60;
-    let passButtonFilter = true;
-    switch (currentFilter) {
-      case 'owned':
-        passButtonFilter = game.is_owned;
-        break;
-      case 'shared':
-        passButtonFilter = !game.is_owned;
-        break;
-      case 'played':
-        passButtonFilter = game.playtime_forever > 0;
-        break;
-      case 'unplayed':
-        passButtonFilter = game.playtime_forever === 0;
-        break;
-      case 'completed':
-        if (!game.hltb || game.hltb.notFound) {
-          passButtonFilter = false;
-        } else {
-          passButtonFilter = playHours > 0 && game.hltb.gameplayMain > 0 && playHours >= game.hltb.gameplayMain;
-        }
-        break;
-      default:
-        passButtonFilter = true;
-        break;
-    }
-    if (!passButtonFilter) return false;
-    
-    // 3. Hide 0h HLTB Checkbox Filter
-    const hideZero = hideZeroCheckbox && hideZeroCheckbox.checked;
-    if (hideZero) {
-      const hasHltbTimes = game.hltb && !game.hltb.notFound && (
-        (game.hltb.gameplayMain || 0) > 0 ||
-        (game.hltb.gameplayMainExtra || 0) > 0 ||
-        (game.hltb.gameplayCompletionist || 0) > 0
-      );
-      if (!hasHltbTimes) return false;
-    }
-    
-    // 4. Time Range Filter
-    if (hltbTimeCategory && hltbMinTime && hltbMaxTime) {
-      const minVal = parseFloat(hltbMinTime.value);
-      const maxVal = parseFloat(hltbMaxTime.value);
-      
-      // If either min or max is provided, we filter
-      if (!isNaN(minVal) || !isNaN(maxVal)) {
-        if (!game.hltb || game.hltb.notFound) return false;
-        
-        let targetTime = 0;
-        switch (hltbTimeCategory.value) {
-          case 'main':
-            targetTime = game.hltb.gameplayMain || 0;
-            break;
-          case 'extra':
-            targetTime = game.hltb.gameplayMainExtra || 0;
-            break;
-          case 'completionist':
-            targetTime = game.hltb.gameplayCompletionist || 0;
-            break;
-        }
-        
-        // If the game has 0 hours for this category and a filter is active, hide it
-        if (targetTime === 0) return false;
-        
-        if (!isNaN(minVal) && targetTime < minVal) return false;
-        if (!isNaN(maxVal) && targetTime > maxVal) return false;
-      }
-    }
-    
-    return true;
-  });
-  
-  visibleGamesCount.textContent = filteredGames.length;
-  renderGrid();
-}
-
-// Render Games Grid
-function renderGrid() {
-  // Sort games list
-  sortGames(filteredGames);
-  
-  if (filteredGames.length === 0) {
-    gamesGrid.innerHTML = `
-      <div class="status-view" style="grid-column: 1 / -1; padding: 3rem;">
-        <i class="fa-solid fa-folder-open" style="font-size: 2.5rem; color: var(--text-muted);"></i>
-        <h3>No games match the criteria</h3>
-        <p>Try clearing your search or filters.</p>
-        <p>THE APP IS STILL IN BETA</p>
-      </div>
+    return `
+      <article class="game-card${beaten ? ' beaten' : ''}" data-appid="${game.appid}" tabindex="0" role="button" aria-label="${escapeHtml(game.name)}">
+        <div class="card-media">
+          <img src="${imgUrl}" alt="${escapeHtml(game.name)}" loading="lazy" decoding="async" data-cover-name="${escapeHtml(game.name)}">
+          <div class="card-badges-top">
+            ${!game.is_owned ? '<span class="pill-badge pill-shared"><i class="fa-solid fa-users"></i> Shared</span>' : ''}
+            ${beaten ? '<span class="pill-badge pill-beaten"><i class="fa-solid fa-check"></i> Beaten</span>' : ''}
+          </div>
+          <span class="card-playtime">${playHrsText}</span>
+          ${progressHtml}
+        </div>
+        <div class="card-body">
+          <div class="card-title-row">
+            <h3 class="game-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</h3>
+            <span class="game-subtitle">${escapeHtml(subParts.join(' · '))}</span>
+          </div>
+          ${hltbHtml}
+        </div>
+      </article>
     `;
-    return;
   }
-  
-  // Reset scroll page limit for new renders
-  visibleCardCount = BATCH_SIZE;
-  
-  // Render only the first batch of games
-  const batch = filteredGames.slice(0, visibleCardCount);
-  gamesGrid.innerHTML = batch.map(game => createCardHtml(game)).join('');
-}
 
-// Load the next batch of games for infinite scrolling
-function loadNextGamesBatch() {
-  if (visibleCardCount >= filteredGames.length) return;
-  
-  const nextBatch = filteredGames.slice(visibleCardCount, visibleCardCount + BATCH_SIZE);
-  visibleCardCount += BATCH_SIZE;
-  
-  // Create elements and append
-  const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = nextBatch.map(game => createCardHtml(game)).join('');
-  
-  while (tempDiv.firstChild) {
-    gamesGrid.appendChild(tempDiv.firstChild);
-  }
-}
-
-// Client Side Game Cover Fallback Generator
-function handleImageError(img, name) {
-  const container = img.parentElement;
-  // Replace the image with a gorgeous gradient placeholder
-  const placeholder = document.createElement('div');
-  placeholder.className = 'game-cover-placeholder';
-  placeholder.style.cssText = `
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, #1d2636 0%, #0f141d 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-    text-align: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  `;
-  placeholder.innerHTML = `
-    <span style="
-      font-family: var(--font-display);
-      font-weight: 700;
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-      line-height: 1.3;
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    ">${name}</span>
-  `;
-  img.remove();
-  container.appendChild(placeholder);
-}
-
-// Sort Algorithm
-function sortGames(list) {
-  list.sort((a, b) => {
-    switch (currentSort) {
-      case 'playtime_desc':
-        return (b.playtime_forever || 0) - (a.playtime_forever || 0);
-      case 'playtime_asc':
-        return (a.playtime_forever || 0) - (b.playtime_forever || 0);
-      case 'name_asc':
-        return a.name.localeCompare(b.name);
-      case 'name_desc':
-        return b.name.localeCompare(a.name);
-      case 'hltb_main_asc': {
-        const tA = a.hltb && !a.hltb.notFound ? a.hltb.gameplayMain : Infinity;
-        const tB = b.hltb && !b.hltb.notFound ? b.hltb.gameplayMain : Infinity;
-        return tA - tB;
-      }
-      case 'hltb_main_desc': {
-        const tA = a.hltb && !a.hltb.notFound ? a.hltb.gameplayMain : -Infinity;
-        const tB = b.hltb && !b.hltb.notFound ? b.hltb.gameplayMain : -Infinity;
-        return tB - tA;
-      }
-      case 'hltb_completionist_asc': {
-        const tA = a.hltb && !a.hltb.notFound ? a.hltb.gameplayCompletionist : Infinity;
-        const tB = b.hltb && !b.hltb.notFound ? b.hltb.gameplayCompletionist : Infinity;
-        return tA - tB;
-      }
-      case 'hltb_completionist_desc': {
-        const tA = a.hltb && !a.hltb.notFound ? a.hltb.gameplayCompletionist : -Infinity;
-        const tB = b.hltb && !b.hltb.notFound ? b.hltb.gameplayCompletionist : -Infinity;
-        return tB - tA;
-      }
-      default:
-        return 0;
+  function renderGridInitial() {
+    state.visibleCount = BATCH_SIZE;
+    if (state.filteredGames.length === 0) {
+      el.gamesGrid.innerHTML = `
+        <div class="state-card" style="grid-column: 1 / -1;">
+          <div class="state-icon"><i class="fa-regular fa-folder-open"></i></div>
+          <h3>No matching titles</h3>
+          <p>Try broadening your search or clearing active filters.</p>
+          <button type="button" class="btn btn-secondary" data-action="reset-filters">Clear filters</button>
+        </div>
+      `;
+      return;
     }
-  });
-}
 
-// HLTB Queue-based Syncing
-function startHltbSync() {
-  // Push games that don't have HLTB data yet to sync queue
-  hltbSyncQueue = games.filter(g => !g.hltb);
-  
-  if (hltbSyncQueue.length === 0) {
-    hltbSyncStatus.style.display = 'none';
-    updateStats();
-    return;
+    const batch = state.filteredGames.slice(0, state.visibleCount);
+    el.gamesGrid.innerHTML = batch.map(createCardHtml).join('');
   }
-  
-  // Sort queue so played games get HLTB data first (prioritize what the user plays!)
-  hltbSyncQueue.sort((a, b) => (b.playtime_forever || 0) - (a.playtime_forever || 0));
-  
-  hltbSyncStatus.style.display = 'flex';
-  updateSyncProgress();
-  
-  // Spawn workers up to MAX_CONCURRENT_SYNC, taking into account already active workers
-  const targetWorkers = Math.min(MAX_CONCURRENT_SYNC, hltbSyncQueue.length);
-  const workersNeeded = targetWorkers - activeSyncWorkers;
-  for (let i = 0; i < workersNeeded; i++) {
-    processNextQueueItem();
-  }
-}
 
-async function processNextQueueItem() {
-  if (hltbSyncQueue.length === 0) {
-    if (activeSyncWorkers === 0) {
-      // Completed all syncing
-      updateStats();
-      updateSyncProgress();
-    }
-    return;
-  }
-  
-  activeSyncWorkers++;
-  const game = hltbSyncQueue.shift();
-  
-  // Mark game as loading
-  game.hltbLoading = true;
-  updateGameInUI(game);
-  
-  try {
-    const hltbData = await fetchHltbData(game);
-    
-    game.hltb = hltbData;
-    game.hltbLoading = false;
-    
-    if (isMobileApp) {
-      await saveMobileLibrary({
-        games: games,
-        lastSync: Date.now()
-      });
-    }
-  } catch (err) {
-    console.error(`Failed to get HLTB for ${game.name}:`, err);
-    game.hltbError = true;
-    game.hltbLoading = false;
-  }
-  
-  // Refresh card in UI and global stats
-  updateGameInUI(game);
-  updateStats();
-  updateSyncProgress();
-  
-  activeSyncWorkers--;
-  
-  // Fetch next item
-  // Add a small delay (e.g. 150ms) to spacing out HLTB request rates
-  setTimeout(processNextQueueItem, 150);
-}
+  function appendNextBatch() {
+    if (state.visibleCount >= state.filteredGames.length) return;
+    const next = state.filteredGames.slice(state.visibleCount, state.visibleCount + BATCH_SIZE);
+    state.visibleCount += BATCH_SIZE;
 
-function updateSyncProgress() {
-  const total = games.length;
-  const processed = total - hltbSyncQueue.length - activeSyncWorkers;
-  const percent = total > 0 ? Math.round((processed / total) * 100) : 100;
-  
-  if (percent < 100) {
-    hltbSyncStatus.innerHTML = `<i class="fa-solid fa-arrows-spin fa-spin"></i> HLTB syncing: <span id="hltb-sync-percent">${percent}%</span>`;
-  } else {
-    hltbSyncStatus.innerHTML = '<i class="fa-solid fa-check"></i> HLTB synced';
-    setTimeout(() => {
-      if (hltbSyncQueue.length === 0 && activeSyncWorkers === 0) {
-        hltbSyncStatus.style.display = 'none';
+    const fragment = document.createRange().createContextualFragment(next.map(createCardHtml).join(''));
+    el.gamesGrid.appendChild(fragment);
+  }
+
+  function patchGameCard(game) {
+    const existing = el.gamesGrid.querySelector(`.game-card[data-appid="${game.appid}"]`);
+    if (!existing) return;
+    const fragment = document.createRange().createContextualFragment(createCardHtml(game).trim());
+    existing.replaceWith(fragment);
+  }
+
+  function initInfiniteScroll() {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        appendNextBatch();
       }
-    }, 3000);
+    }, { rootMargin: '420px 0px' });
+    observer.observe(el.scrollSentinel);
   }
-}
 
-// Update a single game card in the DOM without rebuilding the whole grid
-function updateGameInUI(game) {
-  // Update state in main game array
-  const index = games.findIndex(g => g.appid === game.appid);
-  if (index !== -1) {
-    games[index] = game;
+  // ==========================================================================
+  // GAME DETAIL DRAWER & MANUAL ACTIONS (Beat Toggle / Rematch / Refresh)
+  // ==========================================================================
+
+  function openGameDetail(appid) {
+    const game = state.gamesById.get(Number(appid));
+    if (!game) return;
+    state.activeDetailAppId = game.appid;
+    renderDetailDrawer(game);
+    el.detailPanel.classList.add('open');
+    el.detailPanel.setAttribute('aria-hidden', 'false');
+    el.panelOverlay.hidden = false;
   }
-  
-  // Find card in DOM
-  const card = document.querySelector(`.game-card[data-appid="${game.appid}"]`);
-  
-  // If we have finished loading HLTB data and need to re-run filter based on checkbox
-  if (game.hltb && !game.hltbLoading) {
-    const hideZero = hideZeroCheckbox && hideZeroCheckbox.checked;
-    const hasHltbTimes = !game.hltb.notFound && (
-      (game.hltb.gameplayMain || 0) > 0 ||
-      (game.hltb.gameplayMainExtra || 0) > 0 ||
-      (game.hltb.gameplayCompletionist || 0) > 0
-    );
-    
-    if (hideZero) {
-      if (!hasHltbTimes && card) {
-        // Game has 0 hours but card is visible: re-run search/filter to hide it
-        handleSearchAndFilter();
-        return;
-      } else if (hasHltbTimes && !card) {
-        // Game has >0 hours but card is hidden: re-run search/filter to show it
-        handleSearchAndFilter();
-        return;
-      }
-    }
+
+  function closeGameDetail() {
+    state.activeDetailAppId = null;
+    el.detailPanel.classList.remove('open');
+    el.detailPanel.setAttribute('aria-hidden', 'true');
+    el.panelOverlay.hidden = true;
   }
-  
-  if (!card) return;
-  
-  const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = createCardHtml(game).trim();
-  const newCard = tempDiv.firstChild;
-  card.replaceWith(newCard);
-}
 
-// Helpers
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
+  function renderDetailDrawer(game) {
+    const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`;
+    el.detailCoverFallback.hidden = true;
+    el.detailCoverFallback.textContent = game.name;
+    el.detailCover.hidden = false;
+    el.detailCover.src = imgUrl;
+    el.detailCover.alt = game.name;
 
-const ENDLESS_GAMES_BLOCKLIST = [
-  'team fortress 2',
-  'counter-strike',
-  'counter-strike 2',
-  'counter-strike: global offensive',
-  'dota 2',
-  'pubg: battlegrounds',
-  'apex legends',
-  'destiny 2',
-  'warframe',
-  'rust',
-  'garry\'s mod',
-  'gmod',
-  'left 4 dead',
-  'left 4 dead 2',
-  'dead by daylight',
-  'payday 2',
-  'payday 3',
-  'valorant',
-  'league of legends',
-  'world of warcraft',
-  'overwatch',
-  'overwatch 2',
-  'tft',
-  'teamfight tactics',
-  'hearthstone',
-  'brawlhalla',
-  'rocket league',
-  'smite',
-  'paladins',
-  'vrchat',
-  'terraria',
-  'minecraft',
-  'subnautica',
-  'factorio',
-  'satisfactory',
-  'rimworld',
-  'civilization v',
-  'civilization vi',
-  'sid meier\'s civilization',
-  'hearts of iron iv',
-  'stellaris',
-  'crusader kings iii',
-  'europa universalis iv',
-  'the sims',
-  'the sims 3',
-  'the sims 4',
-  'stardew valley',
-  'cities: skylines',
-  'cities: skylines ii',
-  'euro truck simulator 2',
-  'american truck simulator',
-  'assetto corsa',
-  'iracing',
-  'dead island',
-  'dead island 2',
-  'killing floor',
-  'killing floor 2'
-];
-
-function isEndlessOrMultiplayer(gameName) {
-  const nameLower = gameName.toLowerCase().trim();
-  
-  if (ENDLESS_GAMES_BLOCKLIST.some(blocked => nameLower === blocked || nameLower.includes(blocked))) {
-    return true;
-  }
-  
-  const keywords = [
-    'dedicated server', 
-    'test server', 
-    'public test', 
-    'beta', 
-    'demo', 
-    'benchmarking', 
-    'tool', 
-    'sdk',
-    'soundtrack',
-    'multiplayer'
-  ];
-  if (keywords.some(kw => nameLower.includes(kw))) {
-    return true;
-  }
-  
-  return false;
-}
-
-function escapeHtml(str) {
-  if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-// Generates game card HTML with owner badge, beat status, and HLTB completion ring
-function createCardHtml(game) {
-  const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
-  
-  // Check if beaten
-  let isBeaten = false;
-  if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
-    isBeaten = (game.playtime_forever / 60) >= game.hltb.gameplayMain;
-  }
-  
-  // Image element
-  const imgUrl = game.appid 
-    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`
-    : '';
-    
-  // Badges
-  const ownerBadge = game.is_owned 
-    ? `<span class="owner-badge owned"><i class="fa-solid fa-user"></i> Owned</span>`
-    : `<span class="owner-badge shared"><i class="fa-solid fa-people-group"></i> Borrowed</span>`;
-    
-  // Calculate progress ring
-  let progressRingHtml = '';
-  if (game.hltb && !game.hltb.notFound && game.hltb.gameplayMain > 0) {
     const playHrs = (game.playtime_forever || 0) / 60;
-    const mainHrs = game.hltb.gameplayMain;
-    const pct = Math.min(100, Math.round((playHrs / mainHrs) * 100));
-    
-    const radius = 13;
-    const circumference = 2 * Math.PI * radius; // ~81.68
-    const strokeDashoffset = circumference - (pct / 100) * circumference;
-    
-    let ringClass = 'ring-started';
-    if (pct >= 100) {
-      ringClass = 'ring-completed';
-    } else if (pct >= 50) {
-      ringClass = 'ring-half';
-    }
-    
-    const ringText = pct >= 100 ? '<i class="fa-solid fa-check" style="color: #166534;"></i>' : `${pct}%`;
-    
-    progressRingHtml = `
-      <div class="progress-ring-badge ${ringClass}" title="Completion: ${pct}%" onclick="event.stopPropagation(); openGameDetail(${game.appid});">
-        <svg width="34" height="34">
-          <circle class="ring-track" cx="17" cy="17" r="13"></circle>
-          <circle class="ring-fill" cx="17" cy="17" r="13" 
-            stroke-dasharray="${circumference}" 
-            stroke-dashoffset="${strokeDashoffset}"></circle>
-        </svg>
-        <span class="ring-text">${ringText}</span>
-      </div>
-    `;
-  }
-  
-  // HLTB Content
-  let hltbContent = '';
-  if (game.hltbLoading) {
-    hltbContent = `
-      <div class="hltb-loading-placeholder">
-        <i class="fa-solid fa-circle-notch fa-spin"></i>
-        <span>Retrieving times...</span>
-      </div>
-    `;
-  } else if (game.hltbError) {
-    hltbContent = `
-      <div class="hltb-not-found">
-        <i class="fa-solid fa-circle-exclamation"></i> HLTB error
-      </div>
-    `;
-  } else if (game.hltb === null) {
-    hltbContent = `
-      <div class="hltb-not-found">
-        <i class="fa-solid fa-circle-minus"></i> No HLTB data
-      </div>
-    `;
-  } else if (game.hltb.notFound) {
-    hltbContent = `
-      <div class="hltb-not-found">
-        <i class="fa-solid fa-ban"></i> No HLTB times found
-      </div>
-    `;
-  } else {
-    hltbContent = `
-      <div class="hltb-grid">
-        <div class="hltb-metric main" title="Main Story">
-          <span class="metric-label">Main</span>
-          <span class="metric-value">${game.hltb.gameplayMain}h</span>
-        </div>
-        <div class="hltb-metric extra" title="Main + Extra Content">
-          <span class="metric-label">Extra</span>
-          <span class="metric-value">${game.hltb.gameplayMainExtra}h</span>
-        </div>
-        <div class="hltb-metric completionist" title="100% Completionist">
-          <span class="metric-label">100%</span>
-          <span class="metric-value">${game.hltb.gameplayCompletionist}h</span>
-        </div>
-      </div>
-    `;
-  }
+    el.detailPlaytimeBadge.textContent = `${playHrs.toFixed(1)}h played`;
+    el.detailTitle.textContent = game.name;
 
-  return `
-    <div class="game-card ${isBeaten ? 'beaten' : ''}" data-appid="${game.appid}" onclick="openGameDetail(${game.appid})">
-      ${ownerBadge}
-      <div class="card-screw screw-bl"></div>
-      <div class="card-screw screw-br"></div>
-      <div class="card-header-img">
-        <img src="${imgUrl}" alt="${escapeHtml(game.name)}" loading="lazy" onerror="handleImageError(this, '${escapeHtml(game.name)}')">
-        <span class="playtime-badge"><i class="fa-solid fa-clock"></i> ${playHours} hrs</span>
-        ${progressRingHtml}
-      </div>
-      <div class="card-content">
-        <h3 class="game-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</h3>
-        ${hltbContent}
-      </div>
-    </div>
-  `;
-}
-
-// Compute and render insights panel data
-function computeInsights() {
-  const insightsSection = document.getElementById('insights-section');
-  if (!insightsSection) return;
-  
-  if (games.length === 0) {
-    insightsSection.style.display = 'none';
-    return;
-  }
-  
-  insightsSection.style.display = 'block';
-  
-  // 1. Backlog Games & Hours (Owned games that are not completed or unplayed)
-  const backlogGames = games.filter(g => {
-    if (!g.is_owned) return false;
-    if (isEndlessOrMultiplayer(g.name)) return false;
-    if (!g.hltb || g.hltb.notFound) return g.playtime_forever === 0;
-    const playHours = (g.playtime_forever || 0) / 60;
-    return playHours < (g.hltb.gameplayMain || 1);
-  });
-  
-  const backlogCount = backlogGames.length;
-  const backlogHours = Math.round(backlogGames.reduce((sum, g) => {
-    const playHours = (g.playtime_forever || 0) / 60;
-    const hltbHours = (g.hltb && !g.hltb.notFound) ? (g.hltb.gameplayMain || 0) : 0;
-    const remaining = Math.max(0, hltbHours - playHours);
-    return sum + (remaining || 10); // default to 10h if no HLTB data
-  }, 0));
-  
-  document.getElementById('insight-backlog-games').textContent = `${backlogCount} Games`;
-  document.getElementById('insight-backlog-hours').textContent = `${backlogHours.toLocaleString()}h remaining`;
-  
-  // 2. Clearance Estimate (At average of 5 hours per week)
-  const hrsPerWeek = 5;
-  const weeksToClear = backlogHours / hrsPerWeek;
-  const monthsToClear = Math.ceil(weeksToClear / 4.33);
-  
-  let clearText = '-';
-  if (backlogHours === 0) {
-    clearText = 'Backlog cleared!';
-  } else if (monthsToClear < 1) {
-    clearText = '< 1 month';
-  } else if (monthsToClear === 1) {
-    clearText = '1 month';
-  } else {
-    clearText = `~${monthsToClear} months`;
-  }
-  document.getElementById('insight-clear-time').textContent = clearText;
-  
-  // 3. Neglected Backlog Gem (Owned game, 0 playtime, longest HLTB gameplayMain)
-  const unplayedOwned = games.filter(g => g.is_owned && (g.playtime_forever || 0) === 0 && g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0 && !isEndlessOrMultiplayer(g.name));
-  const gemElement = document.getElementById('insight-neglected-name');
-  if (unplayedOwned.length > 0) {
-    unplayedOwned.sort((a, b) => b.hltb.gameplayMain - a.hltb.gameplayMain);
-    const gem = unplayedOwned[0];
-    gemElement.textContent = gem.name;
-    gemElement.title = `Click to view details for ${gem.name}`;
-    gemElement.className = 'insight-clickable-link';
-    gemElement.onclick = () => openGameDetail(gem.appid);
-    document.getElementById('insight-neglected-time').textContent = `${gem.hltb.gameplayMain}h main story`;
-  } else {
-    gemElement.textContent = 'None found';
-    gemElement.className = '';
-    gemElement.onclick = null;
-    gemElement.title = '';
-    document.getElementById('insight-neglected-time').textContent = 'All owned games played!';
-  }
-}
-
-// Suggest a random backlog game weighted by shortest HLTB time (gamification!)
-function suggestNextGame() {
-  const backlogGames = filteredGames.filter(g => {
-    if (!g.is_owned) return false;
-    if (isEndlessOrMultiplayer(g.name)) return false;
-    const playHours = (g.playtime_forever || 0) / 60;
-    const isCompleted = g.hltb && !g.hltb.notFound && playHours >= g.hltb.gameplayMain;
-    return !isCompleted && g.hltb && !g.hltb.notFound && g.hltb.gameplayMain > 0;
-  });
-  
-  const resultDiv = document.getElementById('suggestion-result');
-  const btn = document.getElementById('suggest-next-btn');
-  
-  if (backlogGames.length === 0) {
-    btn.textContent = 'No options!';
-    resultDiv.style.display = 'none';
-    return;
-  }
-  
-  // Weighted selection: weight = 100 / gameplayMain (shorter games have higher weight)
-  let totalWeight = 0;
-  const weightedList = backlogGames.map(g => {
-    const weight = 100 / (g.hltb.gameplayMain || 1);
-    totalWeight += weight;
-    return { game: g, weight };
-  });
-  
-  let randomVal = Math.random() * totalWeight;
-  let selected = backlogGames[0];
-  
-  for (const item of weightedList) {
-    randomVal -= item.weight;
-    if (randomVal <= 0) {
-      selected = item.game;
-      break;
-    }
-  }
-  
-  if (selected) {
-    const nameElement = document.getElementById('suggested-game-name');
-    nameElement.textContent = selected.name;
-    nameElement.title = `Click to view details for ${selected.name}`;
-    nameElement.className = 'insight-clickable-link';
-    nameElement.onclick = () => openGameDetail(selected.appid);
-    
-    document.getElementById('suggested-game-time').textContent = `Main Story: ${selected.hltb.gameplayMain}h`;
-    
-    btn.textContent = 'Roll Again 🎲';
-    resultDiv.style.display = 'block';
-  }
-}
-
-// Settings Modal functions
-async function openSettingsModal() {
-  const modal = document.getElementById('settings-modal');
-  if (!modal) return;
-  
-  modal.style.display = 'flex';
-  
-  try {
-    let data;
-    if (isMobileApp) {
-      data = await getMobileConfig() || {};
+    const beaten = isGameBeaten(game);
+    const badges = [];
+    badges.push(game.is_owned
+      ? '<span class="drawer-chip">Owned</span>'
+      : '<span class="drawer-chip chip-accent">Family Shared</span>');
+    if (beaten) {
+      badges.push('<span class="drawer-chip chip-success">Beaten</span>');
+    } else if (playHrs > 0) {
+      badges.push('<span class="drawer-chip">In Progress</span>');
     } else {
-      const res = await fetch('/api/config');
-      if (!res.ok) throw new Error('Failed to fetch settings');
-      data = await res.json();
+      badges.push('<span class="drawer-chip">Unplayed</span>');
     }
-    
-    const apiKeyInput = document.getElementById('settings-api-key');
-    const steamIdInput = document.getElementById('settings-steam-id');
-    const familyIdsInput = document.getElementById('settings-family-ids');
-    
-    if (apiKeyInput) {
-      apiKeyInput.value = data.STEAM_API_KEY_MASKED || '';
-      apiKeyInput.placeholder = data.STEAM_API_KEY_SET ? '••••••••••••••••••••••••••••••••' : 'Enter Steam Web API Key';
-    }
-    if (steamIdInput) {
-      steamIdInput.value = data.STEAM_ID || '';
-    }
-    if (familyIdsInput) {
-      familyIdsInput.value = (data.FAMILY_STEAM_IDS || []).join(', ');
-    }
-  } catch (err) {
-    console.error('Failed to load settings:', err);
-  }
-}
+    el.detailBadges.innerHTML = badges.join('');
 
-async function handleSettingsSave(e) {
-  e.preventDefault();
-  
-  const apiKey = document.getElementById('settings-api-key').value.trim();
-  const steamId = document.getElementById('settings-steam-id').value.trim();
-  const familyIdsStr = document.getElementById('settings-family-ids').value.trim();
-  
-  const familyIds = familyIdsStr ? familyIdsStr.split(',').map(id => id.trim()).filter(Boolean) : [];
-  
-  const saveBtn = document.getElementById('save-settings-btn');
-  const originalHtml = saveBtn.innerHTML;
-  saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving...';
-  
-  try {
-    const payload = {
-      STEAM_ID: steamId,
-      FAMILY_STEAM_IDS: familyIds
-    };
-    
+    el.detailBeatToggleBtn.innerHTML = beaten
+      ? '<i class="fa-solid fa-rotate-left"></i><span>Unmark as Beaten</span>'
+      : '<i class="fa-solid fa-check"></i><span>Mark as Beaten</span>';
+
+    // HLTB progress bars
+    const h = game.hltb;
+    if (game.hltbLoading) {
+      el.detailHltbState.textContent = 'Fetching HowLongToBeat times...';
+      el.detailHltbState.hidden = false;
+      el.detailHltbStats.hidden = true;
+    } else if (!h || h.notFound || !hasHltbHours(h)) {
+      el.detailHltbState.textContent = 'No HowLongToBeat times recorded. Try Re-match or Refresh.';
+      el.detailHltbState.hidden = false;
+      el.detailHltbStats.hidden = true;
+    } else {
+      el.detailHltbState.hidden = true;
+      el.detailHltbStats.hidden = false;
+
+      const setBar = (valEl, barEl, targetHrs) => {
+        if (targetHrs > 0) {
+          const pct = Math.min(100, Math.round((playHrs / targetHrs) * 100));
+          valEl.textContent = `${targetHrs}h (${pct}%)`;
+          barEl.style.width = `${pct}%`;
+        } else {
+          valEl.textContent = '—';
+          barEl.style.width = '0%';
+        }
+      };
+
+      setBar(el.detailTimeMain, el.detailProgressMain, h.gameplayMain || 0);
+      setBar(el.detailTimeExtra, el.detailProgressExtra, h.gameplayMainExtra || 0);
+      setBar(el.detailTimeComp, el.detailProgressComp, h.gameplayCompletionist || 0);
+    }
+
+    // Metadata
+    const hasMeta = h && (h.genres || h.developers || h.releaseYear);
+    if (hasMeta) {
+      el.detailMetaSection.hidden = false;
+      el.detailMetaGenreRow.hidden = !h.genres;
+      el.detailMetaGenres.textContent = h.genres || '';
+      el.detailMetaDevRow.hidden = !h.developers;
+      el.detailMetaDev.textContent = h.developers || '';
+      el.detailMetaYearRow.hidden = !h.releaseYear;
+      el.detailMetaYear.textContent = h.releaseYear ? String(h.releaseYear) : '';
+    } else {
+      el.detailMetaSection.hidden = true;
+    }
+
+    el.detailSteamLink.href = `https://store.steampowered.com/app/${game.appid}`;
+    el.detailHltbLink.href = (h && h.hltbId)
+      ? `https://howlongtobeat.com/game/${h.hltbId}`
+      : `https://howlongtobeat.com/?q=${encodeURIComponent(game.name)}`;
+  }
+
+  async function toggleBeatStatus() {
+    const appid = state.activeDetailAppId;
+    if (!appid) return;
+    const game = state.gamesById.get(appid);
+    if (!game) return;
+
+    const currentlyBeaten = isGameBeaten(game);
+    const nextState = currentlyBeaten ? 'unbeaten' : 'beaten';
+
+    try {
+      const res = await fetch(`/api/games/${appid}/beat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: nextState })
+      });
+      if (!res.ok) throw new Error('Could not update beat status.');
+      const data = await res.json();
+      state.manualBeaten = new Set(data.manualBeaten || []);
+      state.manualUnbeaten = new Set(data.manualUnbeaten || []);
+
+      patchGameCard(game);
+      renderDetailDrawer(game);
+      updateStatsAndInsights();
+      showToast(currentlyBeaten ? 'Marked as not beaten.' : 'Marked as beaten.', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function forceRefreshGameHltb() {
+    const appid = state.activeDetailAppId;
+    const game = state.gamesById.get(appid);
+    if (!game) return;
+
+    game.hltbLoading = true;
+    renderDetailDrawer(game);
+    patchGameCard(game);
+
+    try {
+      const res = await fetch(`/api/hltb?title=${encodeURIComponent(game.name)}&appid=${game.appid}&force=1`);
+      if (!res.ok) throw new Error('HLTB refresh failed.');
+      game.hltb = await res.json();
+      game.hltbError = false;
+      showToast(`Refreshed HLTB data for ${game.name}.`, 'success');
+    } catch (err) {
+      game.hltbError = true;
+      showToast(err.message, 'error');
+    } finally {
+      game.hltbLoading = false;
+      patchGameCard(game);
+      if (state.activeDetailAppId === game.appid) renderDetailDrawer(game);
+      updateStatsAndInsights();
+    }
+  }
+
+  // ==========================================================================
+  // MANUAL REMATCH MODAL
+  // ==========================================================================
+
+  let currentRematchResults = [];
+
+  function openRematchModal() {
+    const game = state.gamesById.get(state.activeDetailAppId);
+    if (!game) return;
+    el.rematchSubtitle.textContent = `Search HowLongToBeat to assign the best match for "${game.name}".`;
+    el.rematchSearchInput.value = game.name;
+    el.rematchResults.innerHTML = '';
+    el.rematchModal.hidden = false;
+    el.rematchSearchInput.focus();
+    runRematchSearch();
+  }
+
+  async function runRematchSearch() {
+    const q = el.rematchSearchInput.value.trim();
+    if (!q) return;
+
+    el.rematchResults.innerHTML = '<div class="rematch-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
+
+    try {
+      const res = await fetch(`/api/hltb/search?q=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error('Search failed.');
+      const data = await res.json();
+      currentRematchResults = data.results || [];
+
+      if (currentRematchResults.length === 0) {
+        el.rematchResults.innerHTML = `<div class="rematch-empty">No matches found for "${escapeHtml(q)}".</div>`;
+        return;
+      }
+
+      el.rematchResults.innerHTML = currentRematchResults.map((item, idx) => `
+        <button type="button" class="rematch-item" data-rematch-idx="${idx}">
+          <div class="rematch-item-info">
+            <span class="rematch-item-title">${escapeHtml(item.title)}${item.releaseYear ? ` (${item.releaseYear})` : ''}</span>
+            <span class="rematch-item-sub">Main ${item.gameplayMain || 0}h · Extra ${item.gameplayMainExtra || 0}h · 100% ${item.gameplayCompletionist || 0}h</span>
+          </div>
+          <i class="fa-solid fa-check" style="color: var(--accent);"></i>
+        </button>
+      `).join('');
+    } catch (err) {
+      el.rematchResults.innerHTML = `<div class="rematch-empty">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  async function applyRematch(idx) {
+    const chosen = currentRematchResults[idx];
+    const game = state.gamesById.get(state.activeDetailAppId);
+    if (!chosen || !game) return;
+
+    try {
+      const res = await fetch('/api/hltb/rematch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appid: game.appid, gameName: game.name, hltb: chosen })
+      });
+      if (!res.ok) throw new Error('Failed to save rematch.');
+      const data = await res.json();
+      game.hltb = data.hltb;
+      game.hltbError = false;
+
+      el.rematchModal.hidden = true;
+      patchGameCard(game);
+      renderDetailDrawer(game);
+      updateStatsAndInsights();
+      populateGenreDropdown();
+      showToast(`Matched to "${chosen.title}".`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // ==========================================================================
+  // SETTINGS MODAL
+  // ==========================================================================
+
+  async function openSettingsModal() {
+    el.settingsModal.hidden = false;
+    try {
+      const res = await fetch('/api/config');
+      if (!res.ok) return;
+      const data = await res.json();
+      el.settingsApiKey.value = data.STEAM_API_KEY_MASKED || '';
+      el.settingsApiKey.placeholder = data.STEAM_API_KEY_SET ? '••••••••••••••••••••••••••••••••' : 'Enter your Steam Web API Key';
+      el.settingsSteamId.value = data.STEAM_ID || '';
+      el.settingsFamilyIds.value = (data.FAMILY_STEAM_IDS || []).join(', ');
+    } catch (err) {
+      console.error('Could not load config:', err);
+    }
+  }
+
+  async function saveSettings(e) {
+    e.preventDefault();
+    const apiKey = el.settingsApiKey.value.trim();
+    const steamId = el.settingsSteamId.value.trim();
+    const familyIds = el.settingsFamilyIds.value.split(',').map(s => s.trim()).filter(Boolean);
+
+    const payload = { STEAM_ID: steamId, FAMILY_STEAM_IDS: familyIds };
     if (apiKey && !apiKey.includes('•')) {
       payload.STEAM_API_KEY = apiKey;
     }
-    
-    if (isMobileApp) {
-      const currentConfig = await getMobileConfig() || {};
-      const finalPayload = {
-        ...payload,
-        STEAM_API_KEY: payload.STEAM_API_KEY || currentConfig.STEAM_API_KEY || ''
-      };
-      finalPayload.STEAM_API_KEY_SET = !!finalPayload.STEAM_API_KEY;
-      finalPayload.STEAM_API_KEY_MASKED = finalPayload.STEAM_API_KEY ? '••••••••••••••••••••••••••••••••' : '';
-      
-      await saveMobileConfig(finalPayload);
-      document.getElementById('settings-modal').style.display = 'none';
-      fetchLibrary();
-    } else {
+
+    el.saveSettingsBtn.disabled = true;
+    el.saveSettingsBtn.textContent = 'Saving...';
+
+    try {
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to save settings');
-      }
-      
-      document.getElementById('settings-modal').style.display = 'none';
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save settings.');
+
+      el.settingsModal.hidden = true;
+      showToast('Settings saved.', 'success');
       fetchLibrary();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      el.saveSettingsBtn.disabled = false;
+      el.saveSettingsBtn.textContent = 'Save Settings';
     }
-  } catch (err) {
-    console.error('Failed to save settings:', err);
-    alert(`Failed to save settings: ${err.message}`);
-  } finally {
-    saveBtn.disabled = false;
-    saveBtn.innerHTML = originalHtml;
   }
-}
 
-// Game Detail slide-out functions
-function openGameDetail(appid) {
-  const game = games.find(g => g.appid === Number(appid));
-  if (!game) return;
-  
-  const panel = document.getElementById('game-detail-panel');
-  const overlay = document.getElementById('panel-overlay');
-  if (!panel || !overlay) return;
-  
-  const imgUrl = game.appid 
-    ? `https://cdn.akamai.steamstatic.com/steam/apps/${game.appid}/header.jpg`
-    : '';
-  
-  document.getElementById('detail-cover').src = imgUrl;
-  document.getElementById('detail-cover').onerror = function() {
-    this.src = '';
-    this.style.display = 'none';
-    let textFallback = this.nextElementSibling;
-    if (!textFallback || !textFallback.classList.contains('detail-cover-fallback')) {
-      textFallback = document.createElement('div');
-      textFallback.className = 'detail-cover-fallback';
-      textFallback.style.cssText = `
-        height: 120px;
-        background: linear-gradient(135deg, #1d2636 0%, #0f141d 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: var(--font-display);
-        font-weight: 700;
-        color: var(--text-secondary);
-        padding: 1rem;
-        text-align: center;
-      `;
-      this.parentElement.appendChild(textFallback);
+  // ==========================================================================
+  // EVENT WIRING (Delegated & Quote-Safe)
+  // ==========================================================================
+
+  function resetAllFilters() {
+    state.filter = 'all';
+    state.search = '';
+    state.minTime = null;
+    state.maxTime = null;
+    state.genre = 'all';
+    state.hideZero = false;
+    state.timeCategory = 'main';
+
+    el.searchInput.value = '';
+    el.searchClearBtn.hidden = true;
+    el.hltbMinTime.value = '';
+    el.hltbMaxTime.value = '';
+    el.hltbTimeCategory.value = 'main';
+    el.genreSelect.value = 'all';
+    el.hideZeroCheckbox.checked = false;
+    syncAllCustomSelects();
+
+    el.filterPills.forEach(p => p.classList.toggle('active', p.dataset.filter === 'all'));
+    applyFiltersAndRender();
+  }
+
+  // ==========================================================================
+  // CUSTOM THEME-NATIVE DROPDOWNS
+  // ==========================================================================
+
+  const customSelectControllers = new Map();
+
+  function syncCustomSelect(selectEl) {
+    const ctrl = customSelectControllers.get(selectEl);
+    if (ctrl) ctrl.sync();
+  }
+
+  function syncAllCustomSelects() {
+    for (const ctrl of customSelectControllers.values()) {
+      ctrl.sync();
     }
-    textFallback.textContent = game.name;
-    textFallback.style.display = 'flex';
-  };
-  
-  const fallback = document.querySelector('.detail-cover-fallback');
-  if (fallback) fallback.style.display = 'none';
-  document.getElementById('detail-cover').style.display = 'block';
-  
-  const playHours = ((game.playtime_forever || 0) / 60).toFixed(1);
-  document.getElementById('detail-playtime-badge').innerHTML = `<i class="fa-solid fa-clock"></i> ${playHours} hrs`;
-  document.getElementById('detail-title').textContent = game.name;
-  
-  const ownerBadgeContainer = document.getElementById('detail-owner-badge');
-  ownerBadgeContainer.innerHTML = game.is_owned 
-    ? `<span class="owner-badge owned"><i class="fa-solid fa-user"></i> Owned</span>`
-    : `<span class="owner-badge shared"><i class="fa-solid fa-people-group"></i> Borrowed</span>`;
-    
-  if (!game.is_owned) {
-    const ownerSubtext = document.createElement('span');
-    ownerSubtext.className = 'detail-owner-subtext';
-    ownerSubtext.textContent = ` (Family Shared)`;
-    ownerBadgeContainer.appendChild(ownerSubtext);
   }
-  
-  document.getElementById('detail-steam-link').href = `steam://store/${game.appid}`;
-  document.getElementById('detail-steam-link').setAttribute('data-web-url', `https://store.steampowered.com/app/${game.appid}`);
-  
-  const loading = document.getElementById('detail-hltb-loading');
-  const error = document.getElementById('detail-hltb-error');
-  const none = document.getElementById('detail-hltb-none');
-  const stats = document.getElementById('detail-hltb-stats');
-  const hltbLink = document.getElementById('detail-hltb-link');
-  
-  loading.style.display = 'none';
-  error.style.display = 'none';
-  none.style.display = 'none';
-  stats.style.display = 'none';
-  hltbLink.style.display = 'none';
-  
-  if (game.hltbLoading) {
-    loading.style.display = 'block';
-  } else if (game.hltbError) {
-    error.style.display = 'block';
-  } else if (game.hltb === null || game.hltb.notFound) {
-    none.style.display = 'block';
-  } else {
-    stats.style.display = 'block';
-    hltbLink.style.display = 'inline-flex';
-    hltbLink.href = `https://howlongtobeat.com/game/${game.hltb.hltbId}`;
-    
-    document.getElementById('detail-time-main').textContent = `${game.hltb.gameplayMain}h`;
-    document.getElementById('detail-time-extra').textContent = `${game.hltb.gameplayMainExtra}h`;
-    document.getElementById('detail-time-completionist').textContent = `${game.hltb.gameplayCompletionist}h`;
-    
-    const hoursPlayed = (game.playtime_forever || 0) / 60;
-    
-    const pctMain = game.hltb.gameplayMain > 0 ? Math.min(100, (hoursPlayed / game.hltb.gameplayMain) * 100) : 0;
-    const pctExtra = game.hltb.gameplayMainExtra > 0 ? Math.min(100, (hoursPlayed / game.hltb.gameplayMainExtra) * 100) : 0;
-    const pctComp = game.hltb.gameplayCompletionist > 0 ? Math.min(100, (hoursPlayed / game.hltb.gameplayCompletionist) * 100) : 0;
-    
-    document.getElementById('detail-progress-main').style.width = `${pctMain}%`;
-    document.getElementById('detail-progress-extra').style.width = `${pctExtra}%`;
-    document.getElementById('detail-progress-completionist').style.width = `${pctComp}%`;
-  }
-  
-  panel.classList.add('open');
-  overlay.classList.add('active');
-}
 
-function closeGameDetail() {
-  const panel = document.getElementById('game-detail-panel');
-  const overlay = document.getElementById('panel-overlay');
-  if (panel) panel.classList.remove('open');
-  if (overlay) overlay.classList.remove('active');
-}
+  function closeAllCustomSelects(except = null) {
+    for (const ctrl of customSelectControllers.values()) {
+      if (ctrl !== except) ctrl.close();
+    }
+  }
+
+  function initCustomSelects() {
+    document.querySelectorAll('.select-field').forEach((wrapper) => {
+      const selectEl = wrapper.querySelector('select');
+      if (!selectEl || customSelectControllers.has(selectEl)) return;
+
+      wrapper.classList.add('has-custom-select');
+      selectEl.tabIndex = -1;
+      selectEl.setAttribute('aria-hidden', 'true');
+
+      const trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'select-trigger';
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'select-trigger-label';
+      const caret = document.createElement('i');
+      caret.className = 'fa-solid fa-chevron-down select-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      trigger.append(labelSpan, caret);
+
+      const menu = document.createElement('div');
+      menu.className = 'select-menu';
+      menu.setAttribute('role', 'listbox');
+      menu.hidden = true;
+
+      wrapper.append(trigger, menu);
+
+      const ctrl = {
+        open() {
+          if (selectEl.disabled) return;
+          closeAllCustomSelects(ctrl);
+          wrapper.classList.add('is-open');
+          menu.hidden = false;
+          trigger.setAttribute('aria-expanded', 'true');
+          const active = menu.querySelector('.select-option.is-selected');
+          if (active) active.scrollIntoView({ block: 'nearest' });
+        },
+        close() {
+          wrapper.classList.remove('is-open');
+          menu.hidden = true;
+          trigger.setAttribute('aria-expanded', 'false');
+        },
+        sync() {
+          trigger.disabled = selectEl.disabled;
+          if (selectEl.disabled) ctrl.close();
+          const selectedOpt = selectEl.options[selectEl.selectedIndex];
+          labelSpan.textContent = selectedOpt ? selectedOpt.textContent : '';
+
+          menu.innerHTML = '';
+          Array.from(selectEl.options).forEach((opt) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'select-option';
+            btn.setAttribute('role', 'option');
+            btn.dataset.value = opt.value;
+            const isSel = opt.value === selectEl.value;
+            btn.classList.toggle('is-selected', isSel);
+            btn.setAttribute('aria-selected', String(isSel));
+            btn.innerHTML = `<span>${escapeHtml(opt.textContent)}</span><i class="fa-solid fa-check" aria-hidden="true"></i>`;
+            btn.addEventListener('click', () => {
+              if (selectEl.value !== opt.value) {
+                selectEl.value = opt.value;
+                selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              ctrl.sync();
+              ctrl.close();
+              trigger.focus();
+            });
+            menu.appendChild(btn);
+          });
+        }
+      };
+
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (menu.hidden) ctrl.open();
+        else ctrl.close();
+      });
+
+      trigger.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const opts = Array.from(selectEl.options);
+          const idx = Math.max(0, opts.findIndex(o => o.value === selectEl.value));
+          const nextIdx = e.key === 'ArrowDown'
+            ? Math.min(opts.length - 1, idx + 1)
+            : Math.max(0, idx - 1);
+          if (opts[nextIdx] && opts[nextIdx].value !== selectEl.value) {
+            selectEl.value = opts[nextIdx].value;
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            ctrl.sync();
+            SoundFX.play('tab');
+          }
+        } else if (e.key === 'Escape') {
+          ctrl.close();
+        }
+      });
+
+      customSelectControllers.set(selectEl, ctrl);
+      ctrl.sync();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element) || !e.target.closest('.select-field')) {
+        closeAllCustomSelects();
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAllCustomSelects();
+    });
+  }
+
+  function setupEvents() {
+    // Search
+    const debouncedFilter = debounce(applyFiltersAndRender, 180);
+    el.searchInput.addEventListener('input', () => {
+      state.search = el.searchInput.value;
+      el.searchClearBtn.hidden = state.search.length === 0;
+      debouncedFilter();
+    });
+
+    el.searchClearBtn.addEventListener('click', () => {
+      state.search = '';
+      el.searchInput.value = '';
+      el.searchClearBtn.hidden = true;
+      el.searchInput.focus();
+      applyFiltersAndRender();
+    });
+
+    // Quick filter pills
+    el.filterPills.forEach(pill => {
+      pill.addEventListener('click', () => {
+        el.filterPills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        state.filter = pill.dataset.filter;
+        applyFiltersAndRender();
+      });
+    });
+
+    // Sort & Advanced filters
+    el.sortSelect.addEventListener('change', () => {
+      state.sort = el.sortSelect.value;
+      applyFiltersAndRender();
+    });
+
+    el.toggleAdvancedBtn.addEventListener('click', () => {
+      const open = el.advancedDrawer.hidden;
+      el.advancedDrawer.hidden = !open;
+      el.toggleAdvancedBtn.setAttribute('aria-expanded', String(open));
+    });
+
+    el.hltbTimeCategory.addEventListener('change', () => {
+      state.timeCategory = el.hltbTimeCategory.value;
+      applyFiltersAndRender();
+    });
+
+    el.hltbMinTime.addEventListener('input', debounce(() => {
+      const v = parseFloat(el.hltbMinTime.value);
+      state.minTime = Number.isFinite(v) ? v : null;
+      applyFiltersAndRender();
+    }, 200));
+
+    el.hltbMaxTime.addEventListener('input', debounce(() => {
+      const v = parseFloat(el.hltbMaxTime.value);
+      state.maxTime = Number.isFinite(v) ? v : null;
+      applyFiltersAndRender();
+    }, 200));
+
+    el.genreSelect.addEventListener('change', () => {
+      state.genre = el.genreSelect.value;
+      applyFiltersAndRender();
+    });
+
+    el.hideZeroCheckbox.addEventListener('change', () => {
+      state.hideZero = el.hideZeroCheckbox.checked;
+      applyFiltersAndRender();
+    });
+
+    el.resetFiltersBtn.addEventListener('click', resetAllFilters);
+
+    // Pace selector in Insights
+    el.pacePills.forEach(btn => {
+      btn.addEventListener('click', () => {
+        el.pacePills.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.weeklyPace = Number(btn.dataset.pace) || 5;
+        updateStatsAndInsights();
+      });
+    });
+
+    // Insights interactive links
+    el.insightNeglectedBtn.addEventListener('click', () => {
+      if (el.insightNeglectedBtn.dataset.appid) {
+        openGameDetail(el.insightNeglectedBtn.dataset.appid);
+      }
+    });
+    el.suggestNextBtn.addEventListener('click', suggestNextGame);
+    el.suggestedGameBtn.addEventListener('click', () => {
+      if (el.suggestedGameBtn.dataset.appid) {
+        openGameDetail(el.suggestedGameBtn.dataset.appid);
+      }
+    });
+
+    // Delegated clicks & keyboard activation on Games Grid
+    el.gamesGrid.addEventListener('click', (e) => {
+      const actionBtn = e.target.closest('[data-action]');
+      if (actionBtn) {
+        if (actionBtn.dataset.action === 'sync-now') triggerSync(false);
+        if (actionBtn.dataset.action === 'reset-filters') resetAllFilters();
+        return;
+      }
+      const card = e.target.closest('.game-card');
+      if (card && card.dataset.appid) {
+        openGameDetail(card.dataset.appid);
+      }
+    });
+
+    el.gamesGrid.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        const card = e.target.closest('.game-card');
+        if (card && card.dataset.appid) {
+          e.preventDefault();
+          openGameDetail(card.dataset.appid);
+        }
+      }
+    });
+
+    // Safe delegated image fallback (zero inline onerror XSS/quote bugs!)
+    el.gamesGrid.addEventListener('error', (e) => {
+      const img = e.target;
+      if (img && img.tagName === 'IMG' && img.dataset.coverName) {
+        const fallback = document.createElement('div');
+        fallback.className = 'card-cover-fallback';
+        fallback.textContent = img.dataset.coverName;
+        img.replaceWith(fallback);
+      }
+    }, true);
+
+    el.detailCover.addEventListener('error', () => {
+      el.detailCover.hidden = true;
+      el.detailCoverFallback.hidden = false;
+    });
+
+    // Header & Error buttons
+    el.syncBtn.addEventListener('click', () => {
+      if (state.games.length > 0) el.syncModal.hidden = false;
+      else triggerSync(false);
+    });
+    el.settingsBtn.addEventListener('click', openSettingsModal);
+    el.errorOpenSettingsBtn.addEventListener('click', openSettingsModal);
+    el.errorRetryBtn.addEventListener('click', fetchLibrary);
+
+    // Modals
+    el.closeSettingsBtn.addEventListener('click', () => { el.settingsModal.hidden = true; });
+    el.cancelSettingsBtn.addEventListener('click', () => { el.settingsModal.hidden = true; });
+    el.settingsModal.addEventListener('click', (e) => {
+      if (e.target === el.settingsModal) el.settingsModal.hidden = true;
+    });
+    el.settingsForm.addEventListener('submit', saveSettings);
+
+    el.closeSyncModalBtn.addEventListener('click', () => { el.syncModal.hidden = true; });
+    el.syncModal.addEventListener('click', (e) => {
+      if (e.target === el.syncModal) el.syncModal.hidden = true;
+    });
+    el.quickSyncBtn.addEventListener('click', () => triggerSync(false));
+    el.fullSyncBtn.addEventListener('click', () => triggerSync(true));
+
+    el.closeRematchBtn.addEventListener('click', () => { el.rematchModal.hidden = true; });
+    el.rematchModal.addEventListener('click', (e) => {
+      if (e.target === el.rematchModal) el.rematchModal.hidden = true;
+    });
+    el.rematchSearchBtn.addEventListener('click', runRematchSearch);
+    el.rematchSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runRematchSearch();
+      }
+    });
+    el.rematchResults.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-rematch-idx]');
+      if (btn) applyRematch(Number(btn.dataset.rematchIdx));
+    });
+
+    // Detail Drawer
+    el.closeDetailBtn.addEventListener('click', closeGameDetail);
+    el.panelOverlay.addEventListener('click', closeGameDetail);
+    el.detailBeatToggleBtn.addEventListener('click', toggleBeatStatus);
+    el.detailRematchBtn.addEventListener('click', openRematchModal);
+    el.detailRefreshBtn.addEventListener('click', forceRefreshGameHltb);
+
+    // Global keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (!el.rematchModal.hidden) { el.rematchModal.hidden = true; return; }
+        if (!el.settingsModal.hidden) { el.settingsModal.hidden = true; return; }
+        if (!el.syncModal.hidden) { el.syncModal.hidden = true; return; }
+        closeGameDetail();
+      } else if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = document.activeElement?.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT' && !el.searchInput.disabled) {
+          e.preventDefault();
+          el.searchInput.focus();
+        }
+      }
+    });
+  }
+
+  // ==========================================================================
+  // BOOT
+  // ==========================================================================
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+    initCustomSelects();
+    SoundFX.init();
+    setupEvents();
+    initInfiniteScroll();
+    fetchLibrary();
+  });
+})();
